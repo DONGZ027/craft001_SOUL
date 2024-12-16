@@ -1,0 +1,4 @@
+from templates.page_intro import show_intro
+from templates.page_scenario import show_scenario
+from templates.page_minimization import show_minimization
+from templates.page_maximization import show_maximization

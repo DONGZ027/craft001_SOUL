@@ -6,27 +6,15 @@ import io
 
 today = date.today()
 
-def show_sandbox():
+
+def show_scenario():
 
     #===============================================================================================================================
     # Set Up
     #===============================================================================================================================
     months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'] 
     planning_years = [2023, 2024, 2025, 2026]
-    
-    media_mapping = {
-        'NTV' : 'National TV',
-        'ING' : 'Instagram',
-        'STR' : 'Streaming',
-        'SNP' : 'Snapchat',
-        'TIK' : 'TikTok',
-        'BAN' : 'Banner', 
-        'TWT' : 'Twitter',
-        'RAD' : 'Radio',
-        'AFF' : 'Affiliates',
-        'CEM' : 'Mail / Email',
-        'SEM' : 'Paid Search',
-    }
+    params_file_loc = 'data/'
 
     spend_prefix = "M_P_"  
     inc_prefix = "TIncT_P_" 
@@ -34,10 +22,18 @@ def show_sandbox():
     mcpt_prefix = "MCPT_P_" 
     minc_prefix = "nMTIncT_P_"
 
+    # Model versions
+    # ********************************************************************
+    model_versions = pd.read_csv(params_file_loc + 'model_versions.csv')
+
+    # Media label mapping
+    # ********************************************************************
+    media_mapping = pd.read_csv(params_file_loc + 'media_label.csv')
+    media_mapping = media_mapping.set_index('media_code').to_dict()['media_label']
 
     # Time structure
     # ********************************************************************
-    time_ref  = pd.read_csv('DT_snowflake.csv') 
+    time_ref  = pd.read_csv('data/DT_snowflake.csv') 
     time_ref = time_ref[[
         'FIS_WK_END_DT', 'FIS_YR_NB', 'FIS_MO_NB', 'FIS_QTR_NB', 'FIS_WK_NB', 
     ]].drop_duplicates() 
@@ -58,30 +54,6 @@ def show_sandbox():
 
     time_ref = time_ref.merge(counting_months2, how = 'left', on = ['FIS_YR_NB', 'FIS_MO_NB']).drop_duplicates() 
     df_time = time_ref.reset_index()
-
-
-
-    # Media Timing & 300% Table
-    # ********************************************************************
-    df_curve  = pd.read_csv('input_mediaTiming.csv')
-    media_list = df_curve.columns.tolist()
-
-    df_params  = pd.read_csv('input_300pct.csv')
-    df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
-
-    names = list(df_params.columns)
-    names2 = [s.replace("FABING", "ING") for s in names]
-    names2 = [s.replace("DIS_BAN", "BAN") for s in names2]
-    names2 = [s.replace("DIS_AFF", "AFF") for s in names2]
-    df_params.columns = names2
-
-
-    # Base year mongthly spending
-    # ********************************************************************
-    baseyear = pd.read_csv('scenario2.csv') 
-    baseyear.columns = ['FIS_MO_NB'] + list(media_list)
-    baseyear['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
 
 
 
@@ -439,37 +411,94 @@ def show_sandbox():
 
 
         return plan_summary
+    
 
- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     #===============================================================================================================================
     # Page content begins now 
     #===============================================================================================================================
-    # st.header("Scenario Planning") 
-    # st.write("")
     st.write("")
     st.write("")
+
+    # Initialize session state variables
+    # ********************************************************************
     if 'scenario_computed' not in st.session_state:
                 st.session_state['scenario_computed'] = False
 
+
+    # User inputs
+    # ********************************************************************
     whitespace = 15
     list_tabs = "Input Tab", "Output Tab"
     tab1, tab2 = st.tabs([s.center(whitespace,"\u2001") for s in list_tabs])
 
-    
-    
+    #------------------------------------------------------------------------------------------------------------
+    # Input Tab
+    #------------------------------------------------------------------------------------------------------------
     with tab1:
-        st.write("")
-        st.header("Select spending plans here") 
-        st.write("")
-        st.write("")
-        
+        # User input 1: select region >>> prepare parameters
+        # ******************************************************************** 
+        region = st.selectbox("Select Region", ["UK", 'Italy'], index = 0)
+        file_params = params_file_loc + region + "/input_300pct.csv"
+        file_curve = params_file_loc + region + "/input_mediaTiming.csv"
+        file_base = params_file_loc + region + "/input_base.csv"
+
+        mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
+        adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
+        message = f"** {region} results will be based on media mix model (MMM) on fiscal year {mmm_year}"
+        st.markdown(
+            f"<p style='font-size: 6px; color: #a65407; font-style: italic;'>{message}</p>",
+            unsafe_allow_html=True
+        )
+
+        df_base = pd.read_csv(file_base)
+        df_base.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
+        df_base['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+        df_curve  = pd.read_csv(file_curve)
+        media_list = df_curve.columns.tolist()
+
+        df_params  = pd.read_csv(file_params)
+        df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
+        names = list(df_params.columns)
+        names2 = [s.replace("FABING", "ING") for s in names]
+        names2 = [s.replace("DIS_BAN", "BAN") for s in names2]
+        names2 = [s.replace("DIS_AFF", "AFF") for s in names2]
+        df_params.columns = names2
+
+
+        # User input 2: scenario spend plans
+        # ******************************************************************** 
         if 'results_df' not in st.session_state:
             st.session_state['results_df'] = pd.DataFrame() 
 
         uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
-
 
         if uploaded_files:
             #.......................................................................................................
@@ -579,20 +608,16 @@ def show_sandbox():
                     x = error_medias_scnr2[i]
                     x_ub = np.round(medias_UB_scnr2[i], 0)
                     x_ub = format(x_ub, ",")
-                    st.error(x + " exceeded annual upper bound of $" + x_ub) 
-                    
-                    
-            
+                    st.error(x + " exceeded annual upper bound of $" + x_ub)
 
-            
+
+
             st.write("")
             st.write("")
             st.write("")
 
             st.divider()
             if st.button("Run Analysis", help = 'Click on the button to run scenario analysis, this should take 10 - 15 seconds'):
-
-
                 if len(error_medias_scnr1) > 0 or len(error_medias_scnr2) > 0:
                     st.error("Please address the spending plan errors above before running the analysis")
                 else:
@@ -600,11 +625,11 @@ def show_sandbox():
 
                         # Summary Table
                         # ******************************************************************** 
-                        results1 = build_plan_summary(scnr1_revised, 2024, 0.9)
+                        results1 = build_plan_summary(scnr1_revised, 2024, adjust_ratio)
                         results1.iloc[:, 1:] = results1.iloc[:, 1:].round(1)
                         st.session_state['results1'] = results1
 
-                        results2 = build_plan_summary(scnr2_revised, 2024, 0.9)
+                        results2 = build_plan_summary(scnr2_revised, 2024, adjust_ratio)
                         results2.iloc[:, 1:] = results2.iloc[:, 1:].round(1)
                         st.session_state['results2'] = results2 
 
@@ -612,24 +637,26 @@ def show_sandbox():
                         # Timing Results - Monthly
                         # ********************************************************************
                         
-                        mo_base = plan_forecast_craft(baseyear, 2023, 0, 2, 0.9)[0]
-                        mo_scnr1 = plan_forecast_craft(scnr1_revised, 2024, 1, 1, 0.9)[0]
-                        mo_scnr2 = plan_forecast_craft(scnr2_revised, 2025, 2, 0, 0.9)[0]
+                        mo_base = plan_forecast_craft(df_base, 2023, 0, 2, adjust_ratio)[0]
+                        mo_scnr1 = plan_forecast_craft(scnr1_revised, 2024, 1, 1, adjust_ratio)[0]
+                        mo_scnr2 = plan_forecast_craft(scnr2_revised, 2025, 2, 0, adjust_ratio)[0]
                         forecast_craft_mo = pd.concat([mo_base, mo_scnr1, mo_scnr2], axis = 0)
                         forecast_craft_mo.iloc[:, 1:] = forecast_craft_mo.iloc[:, 1:].round(1)
                         st.session_state['forecast_craft_mo'] = forecast_craft_mo
 
                         # Timing Results - Quarterly
                         # ********************************************************************
-                        qtr_base = plan_forecast_craft(baseyear, 2023, 0, 2, 0.9)[1]
-                        qtr_scnr1 = plan_forecast_craft(scnr1_revised, 2024, 1, 1, 0.9)[1]
-                        qtr_scnr2 = plan_forecast_craft(scnr2_revised, 2025, 2, 0, 0.9)[1]
+                        qtr_base = plan_forecast_craft(df_base, 2023, 0, 2, adjust_ratio)[1]
+                        qtr_scnr1 = plan_forecast_craft(scnr1_revised, 2024, 1, 1, adjust_ratio)[1]
+                        qtr_scnr2 = plan_forecast_craft(scnr2_revised, 2025, 2, 0, adjust_ratio)[1]
                         forecast_craft_qtr = pd.concat([qtr_base, qtr_scnr1, qtr_scnr2], axis = 0)
                         forecast_craft_qtr.iloc[:, 1:] = forecast_craft_qtr.iloc[:, 1:].round(1)
                         st.session_state['forecast_craft_qtr'] = forecast_craft_qtr
 
                     st.session_state["scenario_computed"] = True
                     st.success("Success! Please check the results in the following tabs 👉")
+
+
 
 
 
@@ -701,9 +728,3 @@ def show_sandbox():
                     with container:
                         numRows = forecast_craft_qtr.shape[0]
                         st.dataframe(forecast_craft_qtr, height = (numRows + 1) * 35 + 3, hide_index=True)
-
-
- 
-
-
-    

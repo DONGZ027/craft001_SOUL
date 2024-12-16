@@ -1,0 +1,24 @@
+nav {
+    background-color: #2b2926;
+}
+
+div {
+     max-width: 90rem;
+}
+
+span {
+    color: white;
+    font-weight: bold;
+    font-size: 32px;
+    border-radius: 0.5rem;
+    padding: 0.4375rem 0.625rem;
+    margin: 0 0.125rem;
+}
+
+active {
+    background-color: #a65407;
+}
+
+hover {
+    background-color: #a65407;
+}

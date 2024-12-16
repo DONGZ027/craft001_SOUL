@@ -7,29 +7,28 @@ from datetime import date
 today = date.today()
 
 
-
-
 def show_minimization():
+
     #===============================================================================================================================
     # Set Up
     #===============================================================================================================================
     months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'] 
+    months_full = [
+        "October",
+        "November",
+        "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        ]
     planning_years = [2023, 2024, 2025, 2026]
-    
-    months = [
-            "October",
-            "November",
-            "December",
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            ]
+    params_file_loc = 'data/'
 
     spend_prefix = "M_P_"  
     inc_prefix = "TIncT_P_" 
@@ -37,10 +36,19 @@ def show_minimization():
     mcpt_prefix = "MCPT_P_" 
     minc_prefix = "nMTIncT_P_"
 
+    # Model versions
+    # ********************************************************************
+    model_versions = pd.read_csv(params_file_loc + 'model_versions.csv')
+
+    # Media label mapping
+    # ********************************************************************
+    media_mapping = pd.read_csv(params_file_loc + 'media_label.csv')
+    media_mapping = media_mapping.set_index('media_code').to_dict()['media_label']
+    media_mapping_inverse = {value: key for key, value in media_mapping.items()}
 
     # Time structure
     # ********************************************************************
-    time_ref  = pd.read_csv('DT_snowflake.csv') 
+    time_ref  = pd.read_csv('data/DT_snowflake.csv') 
     time_ref = time_ref[[
         'FIS_WK_END_DT', 'FIS_YR_NB', 'FIS_MO_NB', 'FIS_QTR_NB', 'FIS_WK_NB', 
     ]].drop_duplicates() 
@@ -63,25 +71,6 @@ def show_minimization():
     df_time = time_ref.reset_index()
 
 
-    # Media Timing & 300% Table
-    # ********************************************************************
-    df_curve  = pd.read_csv('input_mediaTiming.csv')
-    media_list = df_curve.columns.tolist()
-
-    df_params  = pd.read_csv('input_300pct.csv')
-    df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
-
-    names = list(df_params.columns)
-    names2 = [s.replace("FABING", "ING") for s in names]
-    names2 = [s.replace("DIS_BAN", "BAN") for s in names2]
-    names2 = [s.replace("DIS_AFF", "AFF") for s in names2]
-    df_params.columns = names2
-
-    # Base year mongthly spending
-    # ********************************************************************
-    baseyear = pd.read_csv('scenario2.csv') 
-    baseyear.columns = ['FIS_MO_NB'] + media_list
-    baseyear['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 
 
@@ -292,7 +281,59 @@ def show_minimization():
         extended_reward_curves.append(extended_aggregated)
 
         return extended_reward_curves
-    
+
+
+
+
+    def plan_forecast_craft(spend_data, planning_year, lead_years, lag_years, cutoff):
+        weekly_table = df_time[['FIS_WK_END_DT', 'FIS_YR_NB', 'FIS_QTR_NB', 'FIS_MO_NB']]
+        results = compute_plan_reward(spend_data, planning_year, lead_years, lag_years, cutoff)
+
+        names = []
+        for i in range(len(results)-1):
+            serl = list(results[i])
+            if len(serl) < weekly_table.shape[0]:
+                serl = serl + [0] * (weekly_table.shape[0] - len(serl))
+            if len(serl) > weekly_table.shape[0]:
+                serl = serl[:weekly_table.shape[0]]
+            col_name = str(planning_year) + ' ' + months[i]
+            names.append(col_name)
+            weekly_table[col_name] = serl
+
+        # Monthly Table
+        # ================================================================================================================
+        monthly_table = weekly_table.groupby(['FIS_YR_NB', 'FIS_MO_NB'])[names].sum().reset_index()
+        rewards = monthly_table.iloc[:, 2:].values.T
+        monthly_table.FIS_MO_NB.replace(dict(zip(range(1, 13), months)), inplace=True) 
+        monthly_table['timeline'] = monthly_table.FIS_YR_NB.astype(str) + " " + monthly_table.FIS_MO_NB.astype(str) 
+        
+        shard1 = pd.DataFrame({'Spending Month': names, "Spend": spend_data.iloc[:, 1:].sum(axis = 1).values})
+        shard2 = pd.DataFrame(rewards)
+        shard2.columns = monthly_table['timeline'].values
+        craft_mo = pd.concat([shard1, shard2], axis=1) 
+
+
+        # Monthly Table
+        # ================================================================================================================
+        quarter_table = weekly_table.groupby(['FIS_YR_NB', 'FIS_QTR_NB'])[names].sum().reset_index()
+        rewards = quarter_table.iloc[:, 2:].values.T 
+        rewards = rewards.reshape(4, 3, -1) # Turning monthly tracking into quarterly tracking
+        rewards = rewards.sum(axis = 1)
+        quarter_table.FIS_QTR_NB = quarter_table.FIS_QTR_NB.astype(str)
+        quarter_table['timeline'] = quarter_table.FIS_YR_NB.astype(str) + " Q" + quarter_table.FIS_QTR_NB.astype(str)
+
+        names = [str(planning_year) + " Q" + str(x) for x in range(1, 5)]
+        shard1 = pd.DataFrame({'Spending Quarter': names, 
+                            "Spend": spend_data.iloc[:, 1:].values.sum(axis = 1).reshape(4, 3).sum(axis = 1)})
+        shard2 = pd.DataFrame(rewards)
+        shard2.columns = quarter_table['timeline'].values
+        craft_qtr = pd.concat([shard1, shard2], axis=1) 
+
+        return craft_mo, craft_qtr
+
+
+
+
     def build_plan_summary(spend_data, planning_year, threshold):
         """
         Build a summary report of the spending plan with total spend, total reward,
@@ -314,8 +355,8 @@ def show_minimization():
                 - 'Total' (aggregated over all medias)
                 - One row per media (e.g., 'YOT', 'FAB')
         """
-        # Ensure global access to necessary dataframes
-        global df_curve, df_params, df_time
+        # Ensure nonlocal access to necessary dataframes
+        nonlocal df_curve, df_params, df_time
 
         # Initialize dictionaries to store summary data
         total_spend_dict = {}
@@ -385,7 +426,25 @@ def show_minimization():
         plan_summary = plan_summary.reset_index().rename(columns={'index': 'Media'})
         plan_summary = plan_summary[['Media', 'Total Spend', 'Total Reward', 'Cost per Reward', 'Marginal Cost per Reward']]
 
+
         return plan_summary
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     # ================================================================================================================================
@@ -891,7 +950,7 @@ def show_minimization():
             'Optimized': collect_optimized
         })
 
-        table1['Change'] = table1['Optimized'] - table1['Original']
+        table1['Change (€)'] = table1['Optimized'] - table1['Original']
         table1['Change (%)'] = np.round((table1.Optimized / table1.Original - 1) * 100, 1)
 
 
@@ -930,31 +989,90 @@ def show_minimization():
         table2 = craft
 
         return plan1, table1, table2
+    
 
 
 
 
-    # ================================================================================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #===============================================================================================================================
     # Page content begins now 
-    # ================================================================================================================================
+    #===============================================================================================================================
+    st.write("")
+    st.write("")
+
+    # Initialize session state variables
+    # ********************************************************************
     if 'minimizer_done' not in st.session_state:
                 st.session_state['minimizer_done'] = False
 
-    st.write("")
-    st.write("")
 
-
+    # User inputs
+    # ********************************************************************
     whitespace = 15
     list_tabs = "Input Tab", "Output Tab"
     tab1, tab2 = st.tabs([s.center(whitespace,"\u2001") for s in list_tabs])
 
+    #------------------------------------------------------------------------------------------------------------
+    # Input Tab
+    #------------------------------------------------------------------------------------------------------------
     with tab1:
-        st.write("")
-        st.header("") 
-        st.write("")
+        # User input 1: select region >>> prepare parameters
+        # ******************************************************************** 
+        region = st.selectbox("Select Region", ["UK", 'Italy'], index = 0)
+        file_params = params_file_loc + region + "/input_300pct.csv"
+        file_curve = params_file_loc + region + "/input_mediaTiming.csv"
+        file_base = params_file_loc + region + "/input_base.csv"
+
+        mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
+        adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
+        message = f"** {region} results will be based on media mix model (MMM) on fiscal year {mmm_year}"
+        st.markdown(
+            f"<p style='font-size: 6px; color: #a65407; font-style: italic;'>{message}</p>",
+            unsafe_allow_html=True
+        )
+
+        df_base = pd.read_csv(file_base)
+        df_base.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
+        df_base['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+        df_curve  = pd.read_csv(file_curve)
+        media_list = df_curve.columns.tolist()
+
+        df_params  = pd.read_csv(file_params)
+        df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
+        names = list(df_params.columns)
+        names2 = [s.replace("FABING", "ING") for s in names]
+        names2 = [s.replace("DIS_BAN", "BAN") for s in names2]
+        names2 = [s.replace("DIS_AFF", "AFF") for s in names2]
+        df_params.columns = names2
+
 
         col1, col2 = st.columns(2)
-        # User input 1: Choosing planning month range
+        # User input 2: Choosing planning month range
         # ********************************************************************
         def split_months_indices(months, start_month, end_month):
             # Find the indices of the start and end months
@@ -978,32 +1096,35 @@ def show_minimization():
             indices_rest = [index + 1 for index in indices_rest]
             
             return indices_between, indices_rest
-
-
+        
         with col1:
             start_month, end_month = st.select_slider(
                 "Planning Period",
-                options= months,
+                options= months_full,
                 value=("October", "September"),
             )
-            planning_months, non_planning_months = split_months_indices(months, start_month, end_month)
+            planning_months, non_planning_months = split_months_indices(months_full, start_month, end_month)
+ 
 
-
-
-
-        # User input 2: entering attendance goal
+        # User input 3: entering attendance goal
         # ******************************************************************************************** 
         with col2:
             attendance_goal = st.number_input(
                 "Attendance Goal", value=None, placeholder="Type a number..."
             )
 
-        # User input 3: choosing baseline spending, using MMM year as default
+
+
+        # User input 4: choosing baseline spending, using MMM year as default
         # ******************************************************************************************** 
         st.write("")  
         st.write("Please enter the initial spending plan")
-        spend_blueprint = baseyear.T.iloc[1:,:].reset_index()
-        spend_blueprint.columns = [['Media'] + months]
+        spend_blueprint = df_base.T.iloc[1:,:].reset_index()
+        spend_blueprint.columns = [['Media'] + months_full]
+        for x in spend_blueprint.columns[1:]:
+            spend_blueprint[x] = spend_blueprint[x].astype(float).round(0)
+        spend_blueprint['Media'] = spend_blueprint['Media'].replace(media_mapping)
+
 
         container = st.container()
         with container:
@@ -1011,17 +1132,18 @@ def show_minimization():
             spend_plan = st.data_editor(
                 spend_blueprint,
                 height = (num_rows + 1) * 35 + 3, 
-                disabled = ['Media'] + non_planning_months,      
+                disabled = ['Media'],     
                 hide_index = True                 
             ) 
 
+        spend_plan['Media'] = spend_plan['Media'].replace(media_mapping_inverse)
         spend_plan = spend_plan.T
         spend_plan.columns = spend_plan.iloc[0]
         spend_plan = spend_plan.iloc[1:].reset_index()
         spend_plan.rename(columns= {'index' : 'FIS_MO_NB'}, inplace = True)
-        spend_plan['FIS_MO_NB'] = spend_plan['FIS_MO_NB'].apply(lambda x: months.index(x) + 1) 
+        spend_plan['FIS_MO_NB'] = spend_plan['FIS_MO_NB'].apply(lambda x: months_full.index(x) + 1) 
         
-        # User input 4: Choosing media bounds
+        # User input 5: Choosing media bounds
         # ********************************************************************************************
         st.write("") 
         st.write("Please choose adjusted bounds for each media channel as percentage.")
@@ -1030,7 +1152,7 @@ def show_minimization():
             'Lower Bound (%)' : 80,
             'Upper Bound (%)' : 120
         })
-
+        df_bounds['Media'] = df_bounds['Media'].replace(media_mapping)
         df_bounds_user = df_bounds.T.iloc[1:, :]
         df_bounds_user.columns = df_bounds.Media.values
         df_bounds_user
@@ -1043,7 +1165,8 @@ def show_minimization():
                 height = (num_rows + 1) * 35 + 3,                
             ) 
 
-        df_bounds_coded = df_bounds_user.T.reset_index()
+        df_bounds_coded = df_bounds_user.rename(columns = media_mapping_inverse)
+        df_bounds_coded = df_bounds_coded.T.reset_index()
         df_bounds_coded.columns = ['Media', 'LB', 'UB']
         for x in df_bounds_coded.columns[1:]:
             df_bounds_coded[x] = df_bounds_coded[x].astype(float) / 100
@@ -1053,7 +1176,7 @@ def show_minimization():
         # Skip for now
 
 
-        
+
         # Runnning the optimizer
         # *********************************************************************************************
         if st.button("Let's begin!"):
@@ -1061,10 +1184,10 @@ def show_minimization():
                 crafts = budget_minimizer(spend_plan, 
                                         planning_months, 
                                         planning_years[1], 
-                                        baseyear, 
+                                        df_base, 
                                         attendance_goal, 
                                         df_bounds_coded, 
-                                        0.9)  
+                                        adjust_ratio)  
                              
                 result_package = optimization_summary(
                     spend_plan,
@@ -1075,6 +1198,7 @@ def show_minimization():
                 st.success("Optimization performed successfully! Please check the results in the output tab 👉")
                 st.session_state['optimization_results'] = result_package
                 st.session_state["minimizer_done"] = True
+
 
 
     with tab2:
@@ -1122,5 +1246,3 @@ def show_minimization():
 
         else:
             st.write("Please complete the steps in the Input Tab and run optimization")
-
-    
