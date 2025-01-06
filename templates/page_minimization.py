@@ -459,13 +459,26 @@ def show_minimization():
             df_bounds, # dataframe of media bounds 
             cutoff # media percentage cutoff for determining the multiplier 
             ):
-        
-        # Step 1: Set spendings in the spending month to 0
+
+        # Utility function to convert an spend array into spend dataframe
         # ================================================================================================================
-        spend_plan_wiped = spend_plan.copy()
-        spend_plan_wiped.loc[spend_plan_wiped['FIS_MO_NB'].isin(planning_months), spend_plan_wiped.columns[1:]] = 0
+        def revise_spend(spend_plan, newSpend_array):
+            spend_plan_revised = spend_plan.copy()
+            spend_plan_revised.iloc[:, 1:] = spend_plan.iloc[:, 1:]
+            for i, month in enumerate(planning_months):
+                spend_plan_revised.loc[spend_plan_revised['FIS_MO_NB'] == month, spend_plan.columns[1:]] = newSpend_array[i*len(spend_plan.columns[1:]):(i+1)*len(spend_plan.columns[1:])]
+            return spend_plan_revised
         
-        # Step 2: Filter df_time and get planning_weeks
+        # Utility function to compute the reward for a given spend plan in planning months
+        # ================================================================================================================
+        def current_reward_calculator(plan, planning_year, planning_months, planning_weeks, cutoff):
+            plan_rewards = compute_plan_reward(plan, planning_year, 1, 0, cutoff)
+            current_reward = 0 
+            for x in planning_months:
+                current_reward += plan_rewards[x-1][planning_weeks].sum() 
+            return current_reward
+        
+        # Step 1: Filter df_time and get planning_weeks
         # ================================================================================================================
         df_time_filtered = df_time[df_time['FIS_YR_NB'].isin([planning_year, planning_year - 1])].reset_index(drop=True)
         planning_weeks = df_time_filtered[
@@ -473,19 +486,25 @@ def show_minimization():
             (df_time_filtered['FIS_MO_NB'].isin(planning_months))
         ].index.tolist()
 
-        # Step 3: Compute reward_debit
+        # Step 2: Compute reward_debit
         # ================================================================================================================
-        reward_credit_year0 = compute_plan_reward(base_year, planning_year - 1, 0, 1, cutoff)[-1]
-        reward_credit_year1 = compute_plan_reward(spend_plan_wiped, planning_year, 1, 0, cutoff)[-1]
+        reward_credit_year0 = compute_plan_reward(base_year, planning_year - 1, 0, 1, cutoff)[-1][planning_weeks].sum()
+        reward_credit_year1 = 0
+        if min(planning_months) > 1:
+            plan_rewards = compute_plan_reward(spend_plan, planning_year, 1, 0, cutoff) 
+            for i in np.arange(min(planning_months) - 1):
+                print(i)
+                reward_credit_year1 += plan_rewards[i][planning_weeks].sum() 
+
         reward_credit = reward_credit_year0 + reward_credit_year1
-        reward_credit = reward_credit[planning_weeks].sum()
         reward_debit = reward_goal - reward_credit
+
 
         print("Reward Goal:", reward_goal)
         print("Total Reward Credit:", reward_credit)
         print(f"Reward Debit: {reward_debit}")
 
-        # Step 4: For each {media, month}, compute the potential gain percentgae (due to media timing)
+        # Step 3: For each {media, month}, compute the potential gain percentgae (due to media timing)
         # ================================================================================================================
         result_data = []
         for month in planning_months:
@@ -521,7 +540,7 @@ def show_minimization():
             array_lb.append(spend * lb_pct)
         array_lb = np.array(array_lb)
 
-        spend_lb = spend_plan_wiped.copy()
+        spend_lb = revise_spend(spend_plan, array_lb)
         for i, month in enumerate(planning_months):
             spend_lb.loc[spend_lb['FIS_MO_NB'] == month, spend_plan.columns[1:]] = array_lb[i*len(spend_plan.columns[1:]):(i+1)*len(spend_plan.columns[1:])]
 
@@ -610,15 +629,11 @@ def show_minimization():
             # Update current_reward and allocation_rank
             allocation_rank.loc[i, 'current_CPT'] = cpt
 
-        # Crated revised spend plan based on spend1, and compute current reward
-        def revise_spend(spend_plan, newSpend_array):
-            spend_plan_revised = spend_plan.copy()
-            spend_plan_revised.iloc[:, 1:] = spend_plan.iloc[:, 1:]
-            for i, month in enumerate(planning_months):
-                spend_plan_revised.loc[spend_plan_revised['FIS_MO_NB'] == month, spend_plan.columns[1:]] = newSpend_array[i*len(spend_plan.columns[1:]):(i+1)*len(spend_plan.columns[1:])]
-            return spend_plan_revised
+        # Crated revised spend plan based on spend1, and compute current reward    
         spend_plan_revised = revise_spend(spend_plan, spend1)
-        current_reward = compute_plan_reward(spend_plan_revised, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
+        current_reward = current_reward_calculator(spend_plan_revised, planning_year, planning_months, planning_weeks, cutoff)
+
+
         print(f"Remaining reward debit: {reward_debit - current_reward}") 
 
 
@@ -630,10 +645,9 @@ def show_minimization():
 
 
 
-
-        # # ================================================================================================================
-        # # Optimization begins
-        # # ================================================================================================================
+        # ================================================================================================================
+        # Optimization begins
+        # ================================================================================================================
         
         # Step 1. Function for a single iteration step
         # ****************************************************************************************************************
@@ -689,7 +703,7 @@ def show_minimization():
                 print(f"Entry {i} ({array_media_entries[i]}) has reached its upper bound and will not be allocated any more budget.")
 
             spend_plan_revised = revise_spend(spend_plan, spend1)
-            current_reward = compute_plan_reward(spend_plan_revised, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
+            current_reward = current_reward_calculator(spend_plan_revised, planning_year, planning_months, planning_weeks, cutoff)
 
             allocation_rank.loc[entry, 'current_CPT'] = new_cpt
             allocation_rank.loc[entry, 'updates'] = allocation_rank.loc[entry, 'updates'] + 1 if 'updates' in allocation_rank.columns else 1
@@ -712,7 +726,7 @@ def show_minimization():
 
         # Main allocation loop
         iteration = 1
-        while remaining_budget > 0 and current_reward < reward_debit:
+        while remaining_budget > 0 and current_reward < reward_debit and iteration <= 17:
             print(f"\nIteration {iteration}:")
             allocation_rank['current_CPT'] = allocation_rank['current_CPT'].round(0)
             allocation_rank = allocation_rank.sort_values('current_CPT')
@@ -783,7 +797,7 @@ def show_minimization():
 
                 # Update current_reward and allocation_rank
                 spend_plan_revised = revise_spend(spend_plan, spend1) 
-                current_reward = compute_plan_reward(spend_plan_revised, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
+                current_reward = current_reward_calculator(spend_plan_revised, planning_year, planning_months, planning_weeks, cutoff)
 
                 allocation_rank.loc[entry, 'current_CPT'] = new_cpt
                 allocation_rank.loc[entry, 'updates'] = allocation_rank.loc[entry, 'updates'] + 1
@@ -817,7 +831,7 @@ def show_minimization():
                     
                     # Update reward and check if target reached
                     spend_plan_revised = revise_spend(spend_plan, spend1)
-                    current_reward = compute_plan_reward(spend_plan_revised, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
+                    current_reward = current_reward_calculator(spend_plan_revised, planning_year, planning_months, planning_weeks, cutoff)
                     
                     print(f"Allocated quarter budget ${quarter_budget:.2f} to {array_media_entries[i]} (Entry {i})")
                     print(f"Current reward: {current_reward:.2f}, Target: {reward_debit:.2f}")
@@ -901,28 +915,27 @@ def show_minimization():
         # ================================================================================================================
         # Wrapping up the results
         # ================================================================================================================
+        total_initial_budget = np.sum(spend0)
+        total_spent = np.sum(spend1)
+        budget_saving = total_initial_budget - total_spent
 
         # Create the final spend plan
-        # ................................
         final_spend_plan = revise_spend(spend_plan, spend1)
-        budget_saving = final_spend_plan.iloc[:, 1:].sum().sum() - spend_plan.iloc[:, 1:].sum().sum()
 
         # Compute the final rewards
-        credit_yr0 = compute_plan_reward(spend_plan, planning_year, 0, 1, cutoff)[-1][planning_weeks].sum()
-        credit_yr1 = compute_plan_reward(spend_plan_wiped, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
-        earned_yr1_optimized = compute_plan_reward(final_spend_plan, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
-        earned_yr1_original = compute_plan_reward(spend_plan, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
-
-        optimized_reward = np.round(credit_yr0 + credit_yr1 + earned_yr1_optimized, 0).astype(int)
-        original_reward = np.round(credit_yr0 + credit_yr1 + earned_yr1_original).astype(int) 
-        rewards = [original_reward, optimized_reward]
+        earned_reward_original = current_reward_calculator(spend_plan, planning_year, planning_months, planning_weeks, cutoff)
+        earned_reward_optimized = current_reward_calculator(final_spend_plan, planning_year, planning_months, planning_weeks, cutoff)
+        
+        original_rewards = np.round(earned_reward_original + reward_credit).astype(int)
+        optimized_rewards = np.round(earned_reward_optimized + reward_credit).astype(int)
+        rewards = [original_rewards, optimized_rewards]
 
         # Create the report message
-        # ................................
         if current_reward >= reward_debit:
-            result_message = f"Target achieved, remaining budget = {remaining_budget:.2f}, budget saving = {budget_saving:.2f}"
+            result_message = 1
         else:
-            result_message = "Failed to reach the target -- all budget expensed"
+            result_message = 0
+
 
         return final_spend_plan, rewards, result_message
     
@@ -1189,15 +1202,21 @@ def show_minimization():
                                         df_bounds_coded, 
                                         adjust_ratio)  
                              
-                result_package = optimization_summary(
-                    spend_plan,
-                    crafts[0],
-                    2024,
-                    crafts[1]
-                )
-                st.success("Optimization performed successfully! Please check the results in the output tab 👉")
-                st.session_state['optimization_results'] = result_package
-                st.session_state["minimizer_done"] = True
+
+                if crafts[2] == 1:
+                    st.success("Optimization performed successfully! Please check the results in the output tab 👉")
+                    st.session_state['optimization_results'] = result_package
+                    st.session_state["minimizer_done"] = True
+
+                    result_package = optimization_summary(
+                        spend_plan,
+                        crafts[0],
+                        2024,
+                        crafts[1]
+                    )
+                
+                if crafts[2] == 0:
+                    st.error("Optimization failed: failed to reach the attendance target after all medias reaching spending upper bounds. Please lower the attendance goal or increase budget.")
 
 
 
