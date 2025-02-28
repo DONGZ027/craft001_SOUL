@@ -1,12 +1,9 @@
 ﻿media_code,media_label
-NTV,National TV
-ING,Meta
+NTV,Linear TV
 STR,VOL
-SNP,Snapchat
-TIK,Tiktok
-BAN,Display Banner
-TWT,Twitter
+BAN,Display
 RAD,Radio
-AFF,Dispay Affiliate
+AFF,Affiliation
 CEM,Email
-SEM,Paid Search
+SEM,Search
+Total_Social,Paid Social Media

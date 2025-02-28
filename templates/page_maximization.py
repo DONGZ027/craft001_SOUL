@@ -200,6 +200,9 @@ def show_maximization():
             monthly_arrays.append(monthly_array)
 
         # Aggregate the monthly arrays into a final reward curve
+        monthly_arrays = [arr[:104] for arr in monthly_arrays]  # Ensure each array is at most 104 elements
+        # Pad any shorter arrays to exactly 104 elements
+        monthly_arrays = [np.pad(arr, (0, 104 - len(arr)), 'constant') if len(arr) < 104 else arr for arr in monthly_arrays]
         reward_X = np.sum(monthly_arrays, axis=0)
 
         # Construct the output DataFrame
@@ -446,26 +449,60 @@ def show_maximization():
     def budget_maximizer(
             spend_plan,   # dataframe of month and media spend
             planning_months, # fiscal month number
-            planning_year, # fiscal year
+            planning_year, # fiscal year,
+            base_year, # spend dataframe of MMM modeling year
             df_bounds, # dataframe of media bounds 
             cutoff # media percentage cutoff for determining the multiplier 
             ):
         
-        # Step 1: Set spendings in the spending month to 0
+        # Utility function to convert an spend array into spend dataframe
         # ================================================================================================================
-        spend_plan_wiped = spend_plan.copy()
-        spend_plan_wiped.loc[spend_plan_wiped['FIS_MO_NB'].isin(planning_months), spend_plan_wiped.columns[1:]] = 0
-
-
-        # Step 2: Get planning_weeks for final reward computation
+        def revise_spend(spend_plan, newSpend_array):
+            spend_plan_revised = spend_plan.copy()
+            spend_plan_revised.iloc[:, 1:] = spend_plan.iloc[:, 1:]
+            for i, month in enumerate(planning_months):
+                spend_plan_revised.loc[spend_plan_revised['FIS_MO_NB'] == month, spend_plan.columns[1:]] = newSpend_array[i*len(spend_plan.columns[1:]):(i+1)*len(spend_plan.columns[1:])]
+            return spend_plan_revised
+        
+        # Utility function to compute the reward for a given spend plan in planning months
+        # ================================================================================================================
+        def current_reward_calculator(plan, planning_year, planning_months, planning_weeks, cutoff):
+            plan_rewards = compute_plan_reward(plan, planning_year, 1, 0, cutoff)
+            current_reward = 0 
+            for x in planning_months:
+                current_reward += plan_rewards[x-1][planning_weeks].sum() 
+            return current_reward
+        
+        # Step 0: Filter df_time and get planning_weeks
         # ================================================================================================================
         df_time_filtered = df_time[df_time['FIS_YR_NB'].isin([planning_year, planning_year - 1])].reset_index(drop=True)
         planning_weeks = df_time_filtered[
             (df_time_filtered['FIS_YR_NB'] == planning_year) & 
             (df_time_filtered['FIS_MO_NB'].isin(planning_months))
         ].index.tolist()
-        
 
+
+        # Step 1: Compute reward_debit
+        # ================================================================================================================
+        reward_credit_year0 = compute_plan_reward(base_year, planning_year - 1, 0, 1, cutoff)[-1][planning_weeks].sum()
+        reward_credit_year1 = 0
+        if min(planning_months) > 1:
+            plan_rewards = compute_plan_reward(spend_plan, planning_year, 1, 0, cutoff) 
+            for i in np.arange(min(planning_months) - 1):
+                print(i)
+                reward_credit_year1 += plan_rewards[i][planning_weeks].sum() 
+
+        reward_credit = reward_credit_year0 + reward_credit_year1
+
+        
+        # Step 2: Set spendings in the spending month to 0
+        # ================================================================================================================
+        spend_plan_wiped = spend_plan.copy()
+        spend_plan_wiped.loc[spend_plan_wiped['FIS_MO_NB'].isin(planning_months), spend_plan_wiped.columns[1:]] = 0
+
+
+
+        
         # Step 3: For each {media, month}, compute the potential gain percentgae (due to media timing)
         # ================================================================================================================
         result_data = []
@@ -599,16 +636,6 @@ def show_maximization():
         entries_at_upper_bound = list(allocation_rank.loc[allocation_rank.current_CPT == 0, 'entry'].values)
         allocation_rank = allocation_rank[allocation_rank['current_CPT'] > 0]
         allocation_rank.current_CPT = allocation_rank.current_CPT.round(0)
-
-        # Function for updating spend plan
-        # ================================================================================================================
-        def revise_spend(spend_plan, newSpend_array):
-            spend_plan_revised = spend_plan.copy()
-            for i, month in enumerate(planning_months):
-                spend_plan_revised.loc[spend_plan_revised['FIS_MO_NB'] == month, spend_plan.columns[1:]] = \
-                    newSpend_array[i*len(spend_plan.columns[1:]):(i+1)*len(spend_plan.columns[1:])]
-            return spend_plan_revised
-        
 
 
         # Function for one iterative step
@@ -852,25 +879,23 @@ def show_maximization():
         final_spend_plan = revise_spend(spend_plan, spend1)
 
         # Compute total reward
-        credit_yr0 = compute_plan_reward(spend_plan, planning_year, 0, 1, cutoff)[-1][planning_weeks].sum()
-        credit_yr1 = compute_plan_reward(spend_plan_wiped, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
-        earned_yr1_optimized = compute_plan_reward(final_spend_plan, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
-        earned_yr1_original = compute_plan_reward(spend_plan, planning_year, 1, 0, cutoff)[-1][planning_weeks].sum()
+        earned_reward_original = current_reward_calculator(spend_plan, planning_year, planning_months, planning_weeks, cutoff)
+        earned_reward_optimized = current_reward_calculator(final_spend_plan, planning_year, planning_months, planning_weeks, cutoff)
 
-        optimized_reward = np.round(credit_yr0 + credit_yr1 + earned_yr1_optimized, 0).astype(int)
-        original_reward = np.round(credit_yr0 + credit_yr1 + earned_yr1_original).astype(int) 
-        rewards = [original_reward, optimized_reward]
+        original_rewards = np.round(earned_reward_original + reward_credit).astype(int)
+        optimized_rewards = np.round(earned_reward_optimized + reward_credit).astype(int)
+        rewards = [original_rewards, optimized_rewards]
 
         return final_spend_plan, rewards
     
 
-    def optimization_summary(plan0, plan1, planning_year, rewards):
+    def optimization_summary(plan0, plan1, planning_year, rewards, cutoff):
 
         # Table 1 - Aggregate Summary
         # ****************************************************************************************************************
         contents = ['Total Spend', 'Total Reward', 'Total Reward in Planning Period', 'Cost per Reward', 'Marginal Cost per Reward']
-        summary0 = build_plan_summary(plan0, planning_year, 0.9)
-        summary1 = build_plan_summary(plan1, planning_year, 0.9)
+        summary0 = build_plan_summary(plan0, planning_year, cutoff)
+        summary1 = build_plan_summary(plan1, planning_year, cutoff)
 
         total_original = summary0.iloc[0, 1:].values.astype(int).tolist()
         planning_original = rewards[0]
@@ -897,7 +922,7 @@ def show_maximization():
             collect0 = np.round(summary0[summary0.Media == x].iloc[:, 1:].values, 1)[0]
             spend0 = collect0[0]
             reward0_total = collect0[1]
-            reward0_plan = np.round(compute_reward_X(x, plan0, planning_year, 0.9)[0]['aggregated'].values[:52].sum(),1) 
+            reward0_plan = np.round(compute_reward_X(x, plan0, planning_year, cutoff)[0]['aggregated'].values[:52].sum(),1) 
             cpa0 = collect0[2]
             mcpa0 = collect0[3]
             values.append([x, 'original', spend0, reward0_total, reward0_plan, cpa0, mcpa0])
@@ -905,7 +930,7 @@ def show_maximization():
             collect1 = np.round(summary1[summary1.Media == x].iloc[:, 1:].values, 1)[0]
             spend1 = collect1[0]
             reward1_total = collect1[1]
-            reward1_plan = np.round(compute_reward_X(x, plan1, planning_year, 0.9)[0]['aggregated'].values[:52].sum(),1)
+            reward1_plan = np.round(compute_reward_X(x, plan1, planning_year, cutoff)[0]['aggregated'].values[:52].sum(),1)
             cpa1 = collect1[2]
             mcpa1 = collect1[3]
             values.append([x, 'optimized', spend1, reward1_total, reward1_plan, cpa1, mcpa1])
@@ -950,10 +975,32 @@ def show_maximization():
     st.write("")
     st.write("")
 
+    # Reset session keys 
+    # ********************************************************************
+    if 'maximizer_page_loaded' not in st.session_state:
+        for key in ['maximizer_region_validated', 'maximizer_region', 'maximizer_region_code']:
+            st.session_state.pop(key, None)
+        st.session_state['maximizer_page_loaded'] = True
+    
+    # Refresh other functionalities
+    # ********************************************************************
+    st.session_state['refresh_scenario'] = "Yes"
+    st.session_state['refresh_minimizer'] = "Yes"
+    st.session_state["scenario_computed"] = False
+
+
     # Initialize session state variables
     # ********************************************************************
     if 'maximizer_done' not in st.session_state:
-                st.session_state['maximizer_done'] = False
+        st.session_state['maximizer_done'] = False
+
+    # Initialize password validation state and add a new state for tracking active tab
+    if 'maximizer_region_validated' not in st.session_state:
+        st.session_state['maximizer_region_validated'] = "Not Validated"
+    if 'maximizer_region' not in st.session_state:
+        st.session_state['maximizer_region'] = ""
+    if 'refresh_maximizer' not in st.session_state:
+        st.session_state['refresh_maximizer'] = "No"
 
 
     # User inputs
@@ -966,163 +1013,194 @@ def show_maximization():
     # Input Tab
     #------------------------------------------------------------------------------------------------------------
     with tab1:
-        # User input 1: select region >>> prepare parameters
-        # ******************************************************************** 
-        region = st.selectbox("Select Region", ["UK", 'Italy'], index = 0)
-        file_params = params_file_loc + region + "/input_300pct.csv"
-        file_curve = params_file_loc + region + "/input_mediaTiming.csv"
-        file_base = params_file_loc + region + "/input_base.csv"
+        # Check if tab has changed and reset validation if needed
+        current_tab = "No"
+        if st.session_state['refresh_maximizer'] != current_tab:
+            st.session_state['maximizer_region_validated'] = "Not Validated"
+            st.session_state['maximizer_region'] = ""
+            st.session_state['refresh_maximizer'] = current_tab
 
-        mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
-        adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
-        message = f"** {region} results will be based on media mix model (MMM) on fiscal year {mmm_year}"
-        st.markdown(
-            f"<p style='font-size: 6px; color: #a65407; font-style: italic;'>{message}</p>",
-            unsafe_allow_html=True
-        )
-
-        df_base = pd.read_csv(file_base)
-        df_base.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
-        df_base['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
-        df_curve  = pd.read_csv(file_curve)
-        media_list = df_curve.columns.tolist()
-
-        df_params  = pd.read_csv(file_params)
-        df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
-        names = list(df_params.columns)
-        names2 = [s.replace("FABING", "ING") for s in names]
-        names2 = [s.replace("DIS_BAN", "BAN") for s in names2]
-        names2 = [s.replace("DIS_AFF", "AFF") for s in names2]
-        df_params.columns = names2
-
-
-        col1, col2 = st.columns(2)
-        # User input 2: Choosing planning month range
-        # ********************************************************************
-        def split_months_indices(months, start_month, end_month):
-            # Find the indices of the start and end months
-            start_index = months.index(start_month)
-            end_index = months.index(end_month)
+        # Get region code from user
+        region_code_maximizer = st.text_input("Please enter the region password", key="maximizer_password_input")
+        st.session_state['maximizer_region_code'] = region_code_maximizer
+        
+        # Validate password
+        if region_code_maximizer:
+            # Assuming model_versions is a DataFrame with 'password' and 'maximizer_region' columns
+            check_maximizer = model_versions.loc[model_versions.password == region_code_maximizer, 'region'].values
             
-            # Handle the case where the start month comes after the end month in the list
-            if start_index <= end_index:
-                # Get the indices of the months between the start and end months (inclusive)
-                indices_between = list(range(start_index, end_index + 1))
-                # Get the indices of the rest of the months
-                indices_rest = list(range(start_index)) + list(range(end_index + 1, len(months)))
+            if len(check_maximizer) == 1:
+                st.session_state['maximizer_region_validated'] = "Validated"
+                st.session_state['maximizer_region'] = check_maximizer[0]
             else:
-                # Get the indices of the months between the start and end months (inclusive), considering the wrap-around
-                indices_between = list(range(start_index, len(months))) + list(range(end_index + 1))
-                # Get the indices of the rest of the months
-                indices_rest = list(range(end_index + 1, start_index))
-            
-            # Convert 0-based indices to 1-based indices
-            indices_between = [index + 1 for index in indices_between]
-            indices_rest = [index + 1 for index in indices_rest]
-            
-            return indices_between, indices_rest
-        
+                st.session_state['maximizer_region_validated'] = "Not Validated"
 
-        with col1:
-            start_month, end_month = st.select_slider(
-                "Planning Period",
-                options= months_full,
-                value=("October", "September"),
+
+        # Display messages
+        if st.session_state['maximizer_region_validated'] == "Not Validated" and region_code_maximizer:
+            st.error("Please enter the correct region password to proceed")
+
+        elif st.session_state['maximizer_region_validated'] == "Validated":
+            # User input 1: select region >>> prepare parameters
+            # ******************************************************************** 
+            region = st.session_state['maximizer_region']
+            file_params = params_file_loc + region + "/input_300pct.csv"
+            file_curve = params_file_loc + region + "/input_mediaTiming.csv"
+            file_base = params_file_loc + region + "/input_base.csv"
+
+            mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
+            adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
+            message = f"** {region} results will be based on media mix model (MMM) on fiscal year {mmm_year}"
+            st.markdown(
+                f"<p style='font-size: 6px; color: #8b0512; font-style: italic;'>{message}</p>",
+                unsafe_allow_html=True
             )
-            planning_months, non_planning_months = split_months_indices(months_full, start_month, end_month)
-        with col2:
-            st.write("")
+
+            df_base = pd.read_csv(file_base)
+            df_base.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
+            df_base['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+            df_curve  = pd.read_csv(file_curve)
+            media_list = df_curve.columns.tolist()
+
+            df_params  = pd.read_csv(file_params)
+            df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
+            names = list(df_params.columns)
+            names2 = [s.replace("FABING", "ING") for s in names]
+            names2 = [s.replace("DIS_BAN", "BAN") for s in names2]
+            names2 = [s.replace("DIS_AFF", "AFF") for s in names2]
+            df_params.columns = names2
 
 
+            col1, col2 = st.columns(2)
+            # User input 2: Choosing planning month range
+            # ********************************************************************
+            def split_months_indices(months, start_month, end_month):
+                # Find the indices of the start and end months
+                start_index = months.index(start_month)
+                end_index = months.index(end_month)
+                
+                # Handle the case where the start month comes after the end month in the list
+                if start_index <= end_index:
+                    # Get the indices of the months between the start and end months (inclusive)
+                    indices_between = list(range(start_index, end_index + 1))
+                    # Get the indices of the rest of the months
+                    indices_rest = list(range(start_index)) + list(range(end_index + 1, len(months)))
+                else:
+                    # Get the indices of the months between the start and end months (inclusive), considering the wrap-around
+                    indices_between = list(range(start_index, len(months))) + list(range(end_index + 1))
+                    # Get the indices of the rest of the months
+                    indices_rest = list(range(end_index + 1, start_index))
+                
+                # Convert 0-based indices to 1-based indices
+                indices_between = [index + 1 for index in indices_between]
+                indices_rest = [index + 1 for index in indices_rest]
+                
+                return indices_between, indices_rest
+            
 
-        # User input 3: choosing baseline spending, using MMM year as default
-        # ******************************************************************************************** 
-        st.write("")  
-        st.write("Please enter the initial spending plan")
-        spend_blueprint = df_base.T.iloc[1:,:].reset_index()
-        spend_blueprint.columns = [['Media'] + months_full]
-        for x in spend_blueprint.columns[1:]:
-            spend_blueprint[x] = spend_blueprint[x].astype(float).round(0)
-        spend_blueprint['Media'] = spend_blueprint['Media'].replace(media_mapping)
-
-
-        container = st.container()
-        with container:
-            num_rows = spend_blueprint.shape[0]
-            spend_plan = st.data_editor(
-                spend_blueprint,
-                height = (num_rows + 1) * 35 + 3, 
-                disabled = ['Media'],     
-                hide_index = True                 
-            ) 
-
-        spend_plan['Media'] = spend_plan['Media'].replace(media_mapping_inverse)
-        spend_plan = spend_plan.T
-        spend_plan.columns = spend_plan.iloc[0]
-        spend_plan = spend_plan.iloc[1:].reset_index()
-        spend_plan.rename(columns= {'index' : 'FIS_MO_NB'}, inplace = True)
-        spend_plan['FIS_MO_NB'] = spend_plan['FIS_MO_NB'].apply(lambda x: months_full.index(x) + 1) 
-        
-        # User input 4: Choosing media bounds
-        # ********************************************************************************************
-        st.write("") 
-        st.write("Please choose adjusted bounds for each media channel as percentage.")
-        df_bounds = pd.DataFrame({
-            'Media' : media_list,
-            'Lower Bound (%)' : 80,
-            'Upper Bound (%)' : 120
-        })
-        df_bounds['Media'] = df_bounds['Media'].replace(media_mapping)
-        df_bounds_user = df_bounds.T.iloc[1:, :]
-        df_bounds_user.columns = df_bounds.Media.values
-        df_bounds_user
-
-        container = st.container()
-        with container:
-            num_rows = df_bounds_user.shape[0]
-            df_bounds_user = st.data_editor(
-                df_bounds_user,
-                height = (num_rows + 1) * 35 + 3,                
-            ) 
-
-        df_bounds_coded = df_bounds_user.rename(columns = media_mapping_inverse)
-        df_bounds_coded = df_bounds_coded.T.reset_index()
-        df_bounds_coded.columns = ['Media', 'LB', 'UB']
-        for x in df_bounds_coded.columns[1:]:
-            df_bounds_coded[x] = df_bounds_coded[x].astype(float) / 100
-
-        # Error Catching
-        # *********************************************************************************************
-        # Skip for now
-
-
-
-        # Runnning the optimizer
-        # *********************************************************************************************
-        if st.button("Let's begin!"):
-            with st.spinner("I'm working on it ..."):
-                crafts = budget_maximizer(spend_plan, 
-                                        planning_months, 
-                                        planning_years[1], 
-                                        df_bounds_coded, 
-                                        adjust_ratio)
-                result_package = optimization_summary(
-                    spend_plan,
-                    crafts[0],
-                    2024,
-                    crafts[1]
+            with col1:
+                start_month, end_month = st.select_slider(
+                    "Planning Period",
+                    options= months_full,
+                    value=("October", "September"),
                 )
-                st.success("Optimization performed successfully! Please check the results in the output tab 👉")
-                st.session_state['optimization_results'] = result_package
-                st.session_state["maximizer_done"] = True
+                planning_months, non_planning_months = split_months_indices(months_full, start_month, end_month)
+
+            with col2:
+                st.write("")
+
+
+
+            # User input 3: choosing baseline spending, using MMM year as default
+            # ******************************************************************************************** 
+            st.write("")  
+            st.write("Please enter the initial spending plan")
+            spend_blueprint = df_base.T.iloc[1:,:].reset_index()
+            spend_blueprint.columns = [['Media'] + months_full]
+            for x in spend_blueprint.columns[1:]:
+                spend_blueprint[x] = spend_blueprint[x].astype(float).round(0)
+            spend_blueprint['Media'] = spend_blueprint['Media'].replace(media_mapping)
+
+
+            container = st.container()
+            with container:
+                num_rows = spend_blueprint.shape[0]
+                spend_plan = st.data_editor(
+                    spend_blueprint,
+                    height = (num_rows + 1) * 35 + 3, 
+                    disabled = ['Media'],     
+                    hide_index = True                 
+                ) 
+
+            spend_plan['Media'] = spend_plan['Media'].replace(media_mapping_inverse)
+            spend_plan = spend_plan.T
+            spend_plan.columns = spend_plan.iloc[0]
+            spend_plan = spend_plan.iloc[1:].reset_index()
+            spend_plan.rename(columns= {'index' : 'FIS_MO_NB'}, inplace = True)
+            spend_plan['FIS_MO_NB'] = spend_plan['FIS_MO_NB'].apply(lambda x: months_full.index(x) + 1) 
+            
+            # User input 4: Choosing media bounds
+            # ********************************************************************************************
+            st.write("") 
+            st.write("Please choose adjusted bounds for each media channel as percentage.")
+            df_bounds = pd.DataFrame({
+                'Media' : media_list,
+                'Lower Bound (%)' : 80,
+                'Upper Bound (%)' : 120
+            })
+            df_bounds['Media'] = df_bounds['Media'].replace(media_mapping)
+            df_bounds_user = df_bounds.T.iloc[1:, :]
+            df_bounds_user.columns = df_bounds.Media.values
+            df_bounds_user
+
+            container = st.container()
+            with container:
+                num_rows = df_bounds_user.shape[0]
+                df_bounds_user = st.data_editor(
+                    df_bounds_user,
+                    height = (num_rows + 1) * 35 + 3,                
+                ) 
+
+            df_bounds_coded = df_bounds_user.rename(columns = media_mapping_inverse)
+            df_bounds_coded = df_bounds_coded.T.reset_index()
+            df_bounds_coded.columns = ['Media', 'LB', 'UB']
+            for x in df_bounds_coded.columns[1:]:
+                df_bounds_coded[x] = df_bounds_coded[x].astype(float) / 100
+
+            # Error Catching
+            # *********************************************************************************************
+            # Skip for now
+
+
+
+            # Runnning the optimizer
+            # *********************************************************************************************
+            if st.button("Let's begin!"):
+                with st.spinner("I'm working on it ..."):
+                    crafts = budget_maximizer(spend_plan, 
+                                            planning_months, 
+                                            planning_years[1], 
+                                            df_base,
+                                            df_bounds_coded, 
+                                            adjust_ratio)
+                    result_package = optimization_summary(
+                        spend_plan,
+                        crafts[0],
+                        2024,
+                        crafts[1],
+                        adjust_ratio
+                    )
+                    st.success("Optimization performed successfully! Please check the results in the output tab 👉")
+                    st.session_state['maximizer_results'] = result_package
+                    st.session_state["maximizer_done"] = True
 
 
 
     with tab2:
         scenario_status = st.session_state['maximizer_done']
         if scenario_status:
-            result_package = st.session_state['optimization_results']
+            result_package = st.session_state['maximizer_results']
             st.write("")
             st.write("")
             viewing = st.selectbox("Select result format to view",['Optimized Spend','Aggregate Summary','Summary by Media'])
@@ -1141,6 +1219,11 @@ def show_maximization():
                     
             if viewing == 'Aggregate Summary':
                 summary = result_package[1]
+
+                # Some post-processing
+                # ********************************************************************************************
+                summary = summary[summary.Contents != 'Total Reward'] # Hide total (12-month) reward
+
                 nrows = summary.shape[0]
                 
                 container = st.container()

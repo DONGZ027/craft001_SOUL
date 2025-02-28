@@ -1,5 +1,5 @@
 nav {
-    background-color: #2b2926;
+    background-color: #24275e;
 }
 
 div {
@@ -16,9 +16,9 @@ span {
 }
 
 active {
-    background-color: #a65407;
+    background-color: rgb(139, 5, 18);
 }
 
 hover {
-    background-color: #a65407;
+    background-color: rgb(139, 5, 18);
 }
