@@ -5,18 +5,21 @@ import numpy as np
 
 def show_intro():
     st.title("Hi there!")
-    col1,  col2 = st.columns(2) 
+    col1, spacing_col, col2 = st.columns([5, 1, 5]) 
 
 
     with col1:
         st.write("")
         st.write('''
-                I am BayMAX - Budgeting Ad Yield Maximizer. Welcome to the planning room for Disneyland Paris.
-
-                Armed with the most recent Media Mix Model results, I can help you plan the advertising budget for the next future years. 
+                Welcome to the SOUL - Scenario and Optimization Unified Lab! 
+                
+                With access to the latest media mix model results, you can plan and vision the effective media contribution over and over again.  
                 ''')
         
+    # The middle column creates the white space
+    with spacing_col:
+        st.write("")
 
     with col2:
         st.write("")
-        st.image("static/images/DLP_logo.PNG", width= 400)
+        st.image("static/images/soul-joe-mr-mittens3.png", width= 350)

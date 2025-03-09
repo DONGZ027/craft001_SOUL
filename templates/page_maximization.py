@@ -2,8 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
-from datetime import date
 
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import time
+from datetime import date
 today = date.today()
 
 
@@ -333,7 +337,7 @@ def show_maximization():
 
 
 
-    def build_plan_summary(spend_data, planning_year, threshold):
+    def build_plan_summary(spend_data, planning_year, threshold, unit_revenue):
         """
         Build a summary report of the spending plan with total spend, total reward,
         cost per reward, and marginal cost per reward for each media and aggregated.
@@ -397,14 +401,14 @@ def show_maximization():
 
 
         # Build the summary DataFrame
-        plan_summary = pd.DataFrame(columns=['Total Spend', 'Total Reward', 'Cost per Reward', 'Marginal Cost per Reward'])
+        plan_summary = pd.DataFrame(columns=['Total Spend', 'Total Attendance', 'Cost per Attendance', 'Marginal Cost per Attendance'])
 
         # Add aggregated totals to the summary
         plan_summary.loc['Total'] = {
             'Total Spend': total_spend_agg,
-            'Total Reward': total_reward_agg,
-            'Cost per Reward': total_spend_agg / total_reward_agg if total_reward_agg != 0 else np.nan,
-            'Marginal Cost per Reward': mc_X_agg / minc_X_agg if minc_X_agg != 0 else np.nan
+            'Total Attendance': total_reward_agg,
+            'Cost per Attendance': total_spend_agg / total_reward_agg if total_reward_agg != 0 else np.nan,
+            'Marginal Cost per Attendance': mc_X_agg / minc_X_agg if minc_X_agg != 0 else np.nan
         }
 
         # Add individual media data to the summary
@@ -416,20 +420,260 @@ def show_maximization():
 
             plan_summary.loc[media] = {
                 'Total Spend': total_spend,
-                'Total Reward': total_reward,
-                'Cost per Reward': total_spend / total_reward if total_reward != 0 else np.nan,
-                'Marginal Cost per Reward': mc_X / minc_X if minc_X != 0 else np.nan
+                'Total Attendance': total_reward,
+                'Cost per Attendance': total_spend / total_reward if total_reward != 0 else np.nan,
+                'Marginal Cost per Attendance': mc_X / minc_X if minc_X != 0 else np.nan
             }
 
         # Reorder rows: aggregated totals first, then individual medias
         plan_summary = plan_summary.reset_index().rename(columns={'index': 'Media'})
-        plan_summary = plan_summary[['Media', 'Total Spend', 'Total Reward', 'Cost per Reward', 'Marginal Cost per Reward']]
+        plan_summary = plan_summary[['Media', 'Total Spend', 'Total Attendance', 'Cost per Attendance', 'Marginal Cost per Attendance']]
+
+        # Add ROAS and MROAS
+        plan_summary['ROAS'] = unit_revenue * plan_summary['Total Attendance'] / plan_summary['Total Spend']
+        plan_summary['MROAS'] = 1 + ((unit_revenue - plan_summary['Marginal Cost per Attendance']) / plan_summary['Marginal Cost per Attendance'])
+
+
+        # Round up columns
+        plan_summary['Total Spend'] = plan_summary['Total Spend'].astype(int)
+        plan_summary['Total Attendance'] = plan_summary['Total Attendance'].astype(int)
+        plan_summary['Cost per Attendance'] = plan_summary['Cost per Attendance'].round(1)
+        plan_summary['Marginal Cost per Attendance'] = plan_summary['Marginal Cost per Attendance'].round(1)
+        plan_summary['ROAS'] = plan_summary['ROAS'].round(1)
+        plan_summary['MROAS'] = plan_summary['MROAS'].round(1)
 
 
         return plan_summary
     
 
+    def scenario_plots(scenarios, metrics, channels, colors, title, ylabel1, ylabel2, currency_symbol):
+        # **********************************************************************************
+        # Read numbers
+        # **********************************************************************************
+        board1 = scenarios[0]
+        board2 = scenarios[1]
 
+        metric1 = metrics[0]
+        metric2 = metrics[1]
+
+        metric1_s1 = board1[metric1].values
+        metric1_s2 = board2[metric1].values
+        max_metric1 =  max(max(metric1_s1), max(metric1_s2))
+
+        metric2_s1 = board1[metric2].values
+        metric2_s2 = board2[metric2].values
+        max_metric2 = max(max(metric2_s1), max(metric2_s2))
+
+        metric1_compare = [(s2 - s1) / s1 * 100 for s1, s2 in zip(metric1_s1, metric1_s2)]
+        metric2_compare = [(s2 - s1) / s1 * 100 for s1, s2 in zip(metric2_s1, metric2_s2)]
+
+        color1_s1 = colors[0]
+        color1_s2 = colors[1]
+        color2_s1 = colors[2]
+        color2_s2 = colors[3]
+
+        default_textpos = 0.5 * max_metric1
+
+        # Create figure with secondary y-axis
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        # **********************************************************************************
+        # The bar plots
+        # **********************************************************************************
+        # Scenario 1
+        # ....................................................
+        fig.add_trace(
+            go.Bar(
+                x= channels,
+                y= metric1_s1,
+                name= "1",
+                marker_color= color1_s1
+            ),
+            secondary_y=False,
+        )
+
+        # Scenario 2
+        # ....................................................
+        fig.add_trace(
+            go.Bar(
+                x= channels,
+                y= metric1_s2,
+                name= "2",
+                marker_color= color1_s2
+            ),
+            secondary_y=False,
+        )
+
+
+
+
+        # **********************************************************************************
+        # Line plots
+        # **********************************************************************************
+        # Scenario 1
+        # ....................................................
+        fig.add_trace(
+            go.Scatter(
+                x=channels,
+                y= metric2_s1,
+                name="MROAS 1",
+                line=dict(
+                    color= color2_s1, 
+                    width=3, dash='dash',
+                    shape='spline',  # This creates a smooth curve
+                    smoothing=1.3    # Adjust smoothing intensity (0.5-1.5 range works well)
+                    ),
+                marker=dict(
+                    size=10,         # Larger marker size
+                    color=color2_s1,
+                    line=dict(
+                        width=1,
+                        color='white'
+                    )
+                )
+
+            ),
+            secondary_y=True,
+        )
+
+        # Scenario 2
+        # ....................................................
+        fig.add_trace(
+            go.Scatter(
+                x=channels,
+                y= metric2_s2,
+                name="MROAS 2",
+                line=dict(color= color2_s2, 
+                        width=3, dash='dash',
+                        shape='spline',  # This creates a smooth curve
+                        smoothing=1.3    # Adjust smoothing intensity (0.5-1.5 range works well)
+                    ),
+                marker=dict(
+                    size=10,         # Larger marker size
+                    color=color2_s2,
+                    line=dict(
+                        width=1,
+                        color='white'
+                    )
+                )
+            ),
+            secondary_y=True,
+        )
+
+
+
+
+        # **********************************************************************************
+        # Costmetics
+        # **********************************************************************************
+
+        # Annotations for metric 1 change
+        for i, channel in enumerate(channels):
+            change = metric1_compare[i]
+            
+            # Determine color based on change
+            color = "green" if change >= 0 else "red"
+            
+            # Format text with plus/minus sign and percentage
+            if change >= 0:
+                text = f"+{change:.1f}%"  # Add plus sign for positive changes
+            else:
+                text = f"{change:.1f}%"   # Negative sign is automatically included
+            
+            # Improved positioning logic
+            current_value = max(metric1_s1[i], metric1_s2[i])
+            
+            # If the value is very small (less than 5% of the maximum), use a fixed position
+            if current_value < 0.03 * max_metric1:
+                ypos = 0.12 * max_metric1  # Position at 15% of max height for very small values
+            # If it's the maximum value, add a bit more space
+            elif current_value >= 0.95 * max_metric1:
+                ypos = 1.05 * max_metric1  # Position at 110% of max for the largest values
+            # For medium values, position proportionally
+            else:
+                ypos = current_value + (0.125 * max_metric1)  # Position above the bar with consistent spacing
+            
+            # Add the annotation without arrows
+            fig.add_annotation(
+                x=channel,
+                y=ypos, 
+                text=text,
+                showarrow=False,  # No arrow
+                font=dict(
+                    color=color, 
+                    size=14,      # Slightly larger font for better visibility
+                    weight='bold' # Make it bold for emphasis
+                ),
+                align='center',
+                bgcolor='rgba(255,255,255,0.7)',  # Semi-transparent white background
+                bordercolor=color,
+                borderwidth=1,
+                borderpad=3
+            )
+
+
+
+
+        fig.update_layout(
+            # Wider plot for spacing
+            width=1300,
+            height=700,
+            # Extra large left margin
+            margin=dict(t=80, r=50, b=100, l=150),
+            # Title styling
+            title=dict(
+                text= title,
+                font=dict(
+                    size=28,
+                    color= color1_s2,
+                    weight='bold'
+                ),
+                x=0.35
+            ),
+            # Other layout
+            barmode='group',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom", 
+                y=-0.15,
+                xanchor="center",
+                x=0.5
+            ),
+            paper_bgcolor='white',
+            plot_bgcolor='white'
+        )
+
+        # Set x-axis properties
+        fig.update_xaxes(
+            title_text="",
+            showgrid=False,
+            showline=True,
+            linewidth=2,
+            linecolor='lightgray'
+        )
+
+        # Set y-axes properties
+        fig.update_yaxes(
+            title_text= ylabel1,
+            title_font=dict(size=16),
+            range=[0, 1.2 * max(max(metric1_s2), max(metric1_s1))],
+            showgrid=True,
+            gridcolor='lightgray',
+            secondary_y=False,
+            tickformat=','
+        )
+
+        fig.update_yaxes(
+            title_text= ylabel2,
+            title_font=dict(size=16),
+            range=[0, 1.2 * max(max(metric2_s2), max(metric2_s1))],
+            showgrid=False,
+            secondary_y=True,
+            tickprefix= currency_symbol,
+            ticksuffix='.0'
+        )
+
+        return fig
 
 
 
@@ -889,13 +1133,13 @@ def show_maximization():
         return final_spend_plan, rewards
     
 
-    def optimization_summary(plan0, plan1, planning_year, rewards, cutoff):
+    def optimization_summary(plan0, plan1, planning_year, rewards, cutoff, unit_revenue):
 
         # Table 1 - Aggregate Summary
         # ****************************************************************************************************************
         contents = ['Total Spend', 'Total Reward', 'Total Reward in Planning Period', 'Cost per Reward', 'Marginal Cost per Reward']
-        summary0 = build_plan_summary(plan0, planning_year, cutoff)
-        summary1 = build_plan_summary(plan1, planning_year, cutoff)
+        summary0 = build_plan_summary(plan0, planning_year, cutoff, unit_revenue).drop(columns = ['ROAS', 'MROAS'])
+        summary1 = build_plan_summary(plan1, planning_year, cutoff, unit_revenue).drop(columns = ['ROAS', 'MROAS'])
 
         total_original = summary0.iloc[0, 1:].values.astype(int).tolist()
         planning_original = rewards[0]
@@ -949,8 +1193,11 @@ def show_maximization():
             craft = craft.merge(hierarchical_df, how = 'left', on = "Media").drop_duplicates()
         table2 = craft
 
-        return plan1, table1, table2
+        return [plan1, table1, table2]
     
+
+
+ 
 
 
 
@@ -1050,9 +1297,12 @@ def show_maximization():
 
             mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
             adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
-            message = f"** {region} results will be based on media mix model (MMM) on fiscal year {mmm_year}"
+            price = model_versions.loc[model_versions.region == region, 'price'].values[0]
+            currency = model_versions.loc[model_versions.region == region, 'currency'].values[0]
+
+            message = f"** {region} scenarios will be based on model results for fiscal year {mmm_year}"
             st.markdown(
-                f"<p style='font-size: 6px; color: #8b0512; font-style: italic;'>{message}</p>",
+                f"<p style='font-size: 6px; color: #4e98ff; font-style: italic;'>{message}</p>",
                 unsafe_allow_html=True
             )
 
@@ -1139,6 +1389,7 @@ def show_maximization():
             spend_plan = spend_plan.iloc[1:].reset_index()
             spend_plan.rename(columns= {'index' : 'FIS_MO_NB'}, inplace = True)
             spend_plan['FIS_MO_NB'] = spend_plan['FIS_MO_NB'].apply(lambda x: months_full.index(x) + 1) 
+
             
             # User input 4: Choosing media bounds
             # ********************************************************************************************
@@ -1189,8 +1440,22 @@ def show_maximization():
                         crafts[0],
                         2024,
                         crafts[1],
-                        adjust_ratio
+                        adjust_ratio,
+                        price
                     )
+
+                    result_package.append(build_plan_summary(spend_plan, 2024, adjust_ratio, price))
+                    result_package.append(build_plan_summary(result_package[0], 2024, adjust_ratio, price))
+
+                    """
+                    Summary of result package items: 
+                    [0] - Optimized Spend
+                    [1] - Aggregate Summary
+                    [2] - Summary by Media
+                    [3] - Summary for original spend plan
+                    [4] - Summary for optimized spend plan
+                    """
+
                     st.success("Optimization performed successfully! Please check the results in the output tab 👉")
                     st.session_state['maximizer_results'] = result_package
                     st.session_state["maximizer_done"] = True
@@ -1210,12 +1475,60 @@ def show_maximization():
                 for x in optimized_spend.columns[1:]:
                     optimized_spend[x] = optimized_spend[x].astype(float).round(1)
                 nrows = optimized_spend.shape[0]
+                optimized_spend_showing = optimized_spend.rename(columns = media_mapping)
 
                 container = st.container()
                 with container:
-                    st.dataframe(optimized_spend, 
+                    st.dataframe(optimized_spend_showing, 
                                 height = (nrows + 1) * 35 + 3, 
                                 hide_index=True)
+                    
+
+                # Plots
+                # *****************************************************************************************************
+                summary0 = result_package[3]
+                summary1 = result_package[4]
+                fig = scenario_plots(
+                    scenarios = [summary0.iloc[1:, :], summary1.iloc[1:, :]],
+
+                    metrics = ['Total Spend', 'MROAS'],
+
+                    channels = list(media_mapping.values()),
+
+                    colors = ['rgb(174, 139, 113)', 
+                            'rgb(140, 63, 12)',
+                            'rgb(174, 139, 113)',
+                            'rgb(140, 63, 12)'
+                            
+                            ],
+
+                    title = "Media budget & MROAS variation per touchpoint", 
+
+                    ylabel1 = "", ylabel2= "", currency_symbol = currency 
+                )
+                st.plotly_chart(fig)
+
+                fig = scenario_plots(
+                    scenarios = [summary0.iloc[1:, :], summary1.iloc[1:, :]],
+
+                    metrics = ['Total Attendance', 'Cost per Attendance'],
+
+                    channels = list(media_mapping.values()),
+
+                    colors = ['rgb(188, 214, 150)', 
+                            'rgb(36, 84, 40)',
+                            'rgb(188, 214, 150)', 
+                            'rgb(36, 84, 40)'
+                            ],
+
+                    title = "Incremental attendance & CPA evolution", 
+
+                    ylabel1 = "", ylabel2= "", currency_symbol = currency 
+                )
+                st.plotly_chart(fig)
+
+
+
                     
             if viewing == 'Aggregate Summary':
                 summary = result_package[1]

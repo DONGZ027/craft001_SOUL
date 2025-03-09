@@ -806,9 +806,9 @@ def show_scenario():
             price = model_versions.loc[model_versions.region == region, 'price'].values[0]
             currency = model_versions.loc[model_versions.region == region, 'currency'].values[0]
 
-            message = f"** {region} results will be based on media mix model (MMM) on fiscal year {mmm_year}"
+            message = f"** {region} scenarios will be based on model results for fiscal year {mmm_year}"
             st.markdown(
-                f"<p style='font-size: 6px; color: #8b0512; font-style: italic;'>{message}</p>",
+                f"<p style='font-size: 6px; color: #4e98ff; font-style: italic;'>{message}</p>",
                 unsafe_allow_html=True
             )
 
