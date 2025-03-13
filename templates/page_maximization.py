@@ -46,9 +46,7 @@ def show_maximization():
 
     # Media label mapping
     # ********************************************************************
-    media_mapping = pd.read_csv(params_file_loc + 'media_label.csv')
-    media_mapping = media_mapping.set_index('media_code').to_dict()['media_label']
-    media_mapping_inverse = {value: key for key, value in media_mapping.items()}
+    media_mapping_file = pd.read_csv(params_file_loc + 'media_label.csv')
 
     # Time structure
     # ********************************************************************
@@ -115,7 +113,7 @@ def show_maximization():
             spend_percentages = spend_array / S_total
 
         # Compute the multiplier based on the threshold
-        multiplier = np.sum(spend_percentages > (threshold / 100))
+        multiplier = np.sum(spend_percentages >= (threshold / 100))
 
         # If multiplier is zero, set it to 1 to avoid division by zero later
         if multiplier == 0:
@@ -451,11 +449,26 @@ def show_maximization():
         # Read numbers
         # **********************************************************************************
         board1 = scenarios[0]
+        board1['Media'] = channels
         board2 = scenarios[1]
+        board2['Media'] = channels
 
         metric1 = metrics[0]
         metric2 = metrics[1]
 
+        # Drop medias with no spending
+        # ******************************************************************************
+        drops = []
+        set1 = set(board1.loc[board1[metric1] == 0, 'Media'].values) 
+        set2 = set(board2.loc[board2[metric1] == 0, 'Media'].values)
+        drops.append(list(set1.intersection(set2)))
+        board1 = board1[~board1['Media'].isin(drops[0])]
+        board2 = board2[~board2['Media'].isin(drops[0])] 
+        channels = [x for x in channels if x not in drops[0]]
+        print(channels)
+
+        # Gather metrics 
+        # ******************************************************************************
         metric1_s1 = board1[metric1].values
         metric1_s2 = board2[metric1].values
         max_metric1 =  max(max(metric1_s1), max(metric1_s2))
@@ -1295,6 +1308,8 @@ def show_maximization():
             file_curve = params_file_loc + region + "/input_mediaTiming.csv"
             file_base = params_file_loc + region + "/input_base.csv"
 
+            media_mapping = media_mapping_file[media_mapping_file.region == region].set_index('media_code').to_dict()['media_label']
+            media_mapping_inverse = {value: key for key, value in media_mapping.items()}
             mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
             adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
             price = model_versions.loc[model_versions.region == region, 'price'].values[0]

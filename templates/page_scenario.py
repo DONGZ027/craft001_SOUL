@@ -32,8 +32,8 @@ def show_scenario():
 
     # Media label mapping
     # ********************************************************************
-    media_mapping = pd.read_csv(params_file_loc + 'media_label.csv')
-    media_mapping = media_mapping.set_index('media_code').to_dict()['media_label']
+    media_mapping_file = pd.read_csv(params_file_loc + 'media_label.csv')
+    # media_mapping = media_mapping.set_index('media_code').to_dict()['media_label']
 
     # Time structure
     # ********************************************************************
@@ -102,7 +102,7 @@ def show_scenario():
             spend_percentages = spend_array / S_total
 
         # Compute the multiplier based on the threshold
-        multiplier = np.sum(spend_percentages > (threshold / 100))
+        multiplier = np.sum(spend_percentages >= (threshold / 100))
 
         # If multiplier is zero, set it to 1 to avoid division by zero later
         if multiplier == 0:
@@ -477,6 +477,18 @@ def show_scenario():
         metric1 = metrics[0]
         metric2 = metrics[1]
 
+        # Drop medias with no spending
+        # ******************************************************************************
+        drops = []
+        set1 = set(board1.loc[board1[metric1] == 0, 'Media'].values) 
+        set2 = set(board2.loc[board2[metric1] == 0, 'Media'].values)
+        drops.append(list(set1.intersection(set2)))
+        board1 = board1[~board1['Media'].isin(drops[0])]
+        board2 = board2[~board2['Media'].isin(drops[0])] 
+        channels = [x for x in channels if x not in drops[0]]
+
+        # Gather metrics 
+        # ******************************************************************************
         metric1_s1 = board1[metric1].values
         metric1_s2 = board2[metric1].values
         max_metric1 =  max(max(metric1_s1), max(metric1_s2))
@@ -801,6 +813,7 @@ def show_scenario():
             file_curve = params_file_loc + region + "/input_mediaTiming.csv"
             file_base = params_file_loc + region + "/input_base.csv"
 
+            media_mapping = media_mapping_file[media_mapping_file.region == region].set_index('media_code').to_dict()['media_label']
             mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
             adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
             price = model_versions.loc[model_versions.region == region, 'price'].values[0]
@@ -846,6 +859,7 @@ def show_scenario():
                 file_names = []
                 for file in uploaded_files:
                     df = pd.read_csv(file)
+                    df.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
                     dfs.append(df)
                     file_names.append(file.name) 
 
@@ -983,7 +997,7 @@ def show_scenario():
 
 
                             mo_scnr2 = plan_forecast_craft(scnr2_revised, mmm_year + 1, 1, 1, adjust_ratio)[0]
-                            forecast_craft_mo_s2 = pd.concat([mo_base, mo_scnr1], axis = 0)
+                            forecast_craft_mo_s2 = pd.concat([mo_base, mo_scnr2], axis = 0)
                             forecast_craft_mo_s2.iloc[:, 1:] = forecast_craft_mo_s2.iloc[:, 1:].round(1)
                             forecast_craft_mo_s2 = forecast_table_summarizer(forecast_craft_mo_s2)
 
@@ -1000,7 +1014,7 @@ def show_scenario():
 
 
                             qtr_scnr2 = plan_forecast_craft(scnr2_revised, mmm_year + 1, 1, 1, adjust_ratio)[1]
-                            forecast_craft_qtr_s2 = pd.concat([qtr_base, qtr_scnr1], axis = 0)
+                            forecast_craft_qtr_s2 = pd.concat([qtr_base, qtr_scnr2], axis = 0)
                             forecast_craft_qtr_s2.iloc[:, 1:] = forecast_craft_qtr_s2.iloc[:, 1:].round(1)
                             forecast_craft_qtr_s2 = forecast_table_summarizer(forecast_craft_qtr_s2)
 

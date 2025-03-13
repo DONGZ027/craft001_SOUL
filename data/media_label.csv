@@ -1,9 +1,18 @@
-﻿media_code,media_label
-NTV,Linear TV
-STR,VOL
-BAN,Display
-RAD,Radio
-AFF,Affiliation
-CEM,Email
-SEM,Search
-Total_Social,Paid Social Media
+﻿region,media_code,media_label
+UK,NTV,Linear TV
+UK,STR,VOL
+UK,BAN,Display
+UK,RAD,Radio
+UK,AFF,Affiliation
+UK,CEM,Email
+UK,SEM,Search
+UK,Total_Social,Paid Social Media
+WDW,NTV,National TV
+WDW,TTV,Addressable TV
+WDW,STR,Streaming
+WDW,YOT,YouTube
+WDW,CIN,Cinema
+WDW,DIS,Display
+WDW,SEM,Paid Search
+WDW,FBT,FaceBook Twitter
+WDW,DRD,Digital Radio
