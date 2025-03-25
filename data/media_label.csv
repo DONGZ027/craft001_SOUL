@@ -9,10 +9,16 @@ UK,SEM,Search
 UK,Total_Social,Paid Social Media
 WDW,NTV,National TV
 WDW,TTV,Addressable TV
-WDW,STR,Streaming
+WDW,CTVP,Connected TV (Disney Managed)
+WDW,CTVNP,Connected TV (Agency Placed)
+WDW,DD,Data Driven Video
+WDW,STRP,Streaming (Disney Managed)
+WDW,STRNP,Streaming (Agency Placed)
 WDW,YOT,YouTube
 WDW,CIN,Cinema
-WDW,DIS,Display
+WDW,DISP,Display (Disney Managed)
+WDW,DISNP,Display (Agency Placed)
 WDW,SEM,Paid Search
-WDW,FBT,FaceBook Twitter
-WDW,DRD,Digital Radio
+WDW,PAID_SOCIAL,Paid Social
+WDW,DCI,Digital Content Integration
+WDW,DRD,Digital Audio

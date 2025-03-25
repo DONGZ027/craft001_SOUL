@@ -13,7 +13,8 @@ def show_intro():
         st.write('''
                 Welcome to the SOUL - Scenario and Optimization Unified Lab! 
                 
-                With access to the latest media mix model results, you can plan and vision the effective media contribution over and over again.  
+                Media spend planning is an art of tuning and balancing. 
+                Equiped with the latest media mix model results and advanced algorithms, this is a place for you to rehearsal over and over again until you reach the perfect harmony across media channels.  
                 ''')
         
     # The middle column creates the white space
@@ -22,4 +23,4 @@ def show_intro():
 
     with col2:
         st.write("")
-        st.image("static/images/soul-joe-mr-mittens3.png", width= 350)
+        st.image("static_files/images/soul-joe-mr-mittens_piano2.png", width= 500)

@@ -85,6 +85,7 @@ def show_scenario():
                 - minc_X (float): Total marginal rewards for media X over 12 months.
                 - mc_X (float): Total marginal costs for media X over 12 months.
         """
+        # Ensure global access to necessary dataframes
         nonlocal df_curve, df_params, df_time
 
         # ================================================================================================================
@@ -93,6 +94,7 @@ def show_scenario():
         spend_array = spend_data[X].values  # Spending for media X over 12 months
         # Compute total spending S_total
         S_total = spend_array.sum()
+        benchmark_spend = 3 * S_total / np.count_nonzero(spend_array) # Compute the benchmark, or upper bound, for monthly spending
 
         # Handle the case when total spending is zero to avoid division by zero
         if S_total == 0:
@@ -145,7 +147,7 @@ def show_scenario():
                 continue
 
             # Step 2: Calculate annualized spending and find the closest match in df_params
-            S_yr = S_mo * multiplier
+            S_yr = min(S_mo, benchmark_spend) * multiplier
             M_P_X_col = spend_prefix + X
             TIncT_P_X_col = inc_prefix + X
             nMTIncT_P_X_col = minc_prefix + X  # Marginal rewards column
@@ -153,14 +155,17 @@ def show_scenario():
 
             # Find the index of the closest spending value in df_params
             idx_closest = (np.abs(df_params[M_P_X_col] - S_yr)).idxmin()
-
-            # Retrieve values from df_params
-            reward_yr = df_params.at[idx_closest, TIncT_P_X_col]
-            reward_mo = reward_yr / multiplier
+            
+            if idx_closest == 0:
+                reward_mo = 0
+            else:
+                cpt_yr = df_params[cpt_prefix + X].iloc[idx_closest]
+                reward_mo = S_mo / cpt_yr
 
             # Calculate minc_mo and mc_mo for marginal cost per reward
             minc_mo = df_params.at[idx_closest, nMTIncT_P_X_col]
-            mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
+            # mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
+            mc_mo = 0.001 * S_yr
 
 
             # Accumulate total marginal increments and costs
@@ -170,7 +175,7 @@ def show_scenario():
             # Step 3: Generate the reward curve for the month
             timing_curve = df_curve[X].values  # Timing curve of length 52
             monthly_reward_curve = reward_mo * timing_curve
-
+            # monthly_arrays.append(monthly_reward_curve)
 
             # Step 4: Create a 104-length array with appropriate leading zeros
             start_week = start_weeks[fiscal_month - 1]
@@ -189,13 +194,14 @@ def show_scenario():
                     np.zeros(trailing_zeros)
                 ])
             monthly_arrays.append(monthly_array)
-            
+        
 
-        # Aggregate the monthly arrays into a final reward curve
+        #Aggregate the monthly arrays into a final reward curve
         monthly_arrays = [arr[:104] for arr in monthly_arrays]  # Ensure each array is at most 104 elements
         # Pad any shorter arrays to exactly 104 elements
         monthly_arrays = [np.pad(arr, (0, 104 - len(arr)), 'constant') if len(arr) < 104 else arr for arr in monthly_arrays]
         reward_X = np.sum(monthly_arrays, axis=0)
+
 
         # Construct the output DataFrame
         columns = [f'Month_{i+1}' for i in range(12)] + ['aggregated']
@@ -828,8 +834,11 @@ def show_scenario():
             # Set up dataframes 
             # ********************************************************************
             df_base = pd.read_csv(file_base)
-            df_base.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
-            df_base['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            df_base = df_base.T.iloc[1:, :]
+            df_base.columns = media_mapping.keys()
+            df_base.reset_index(inplace=True)
+            df_base.rename(columns={'index': 'FIS_MO_NB'}, inplace=True)
+            df_base['FIS_MO_NB'] = np.arange(1, 13)
 
             df_curve  = pd.read_csv(file_curve)
             media_list = df_curve.columns.tolist()
@@ -859,7 +868,14 @@ def show_scenario():
                 file_names = []
                 for file in uploaded_files:
                     df = pd.read_csv(file)
-                    df.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
+                    df = df.T.iloc[1:, :]
+                    df.columns = media_mapping.keys()
+                    df.reset_index(inplace=True)
+                    df.rename(columns={'index': 'FIS_MO_NB'}, inplace=True)
+                    df['FIS_MO_NB'] = np.arange(1, 13)
+
+
+
                     dfs.append(df)
                     file_names.append(file.name) 
 

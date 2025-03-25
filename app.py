@@ -18,7 +18,7 @@ st.set_page_config(
 
 # WebApp Cosmetics
 parent_dir = os.path.dirname(os.path.abspath(__file__))
-logo_path = os.path.join(parent_dir, "static/images/logo.svg")
+logo_path = os.path.join(parent_dir, "static_files/images/logo.svg")
 
 options = {
     "show_menu": True,
@@ -30,7 +30,7 @@ options = {
 def css_to_dict():
     """Converts CSS to a Python dictionary."""
 
-    with open('static/css/styles.css') as f:
+    with open('static_files/css/styles.css') as f:
         styles = f.read()
 
     css_dict = {}
@@ -73,7 +73,7 @@ def get_img_as_base64(file):
 # =====================================================================================================================
 # Background Image
 # =====================================================================================================================
-img = get_img_as_base64("static/images/soul08.png")
+img = get_img_as_base64("static_files/images/soul08.png")
 
 page_bg_img = f"""
 <style>

@@ -95,7 +95,7 @@ def show_maximization():
                 - minc_X (float): Total marginal rewards for media X over 12 months.
                 - mc_X (float): Total marginal costs for media X over 12 months.
         """
-        # Ensure nonlocal access to necessary dataframes
+        # Ensure global access to necessary dataframes
         nonlocal df_curve, df_params, df_time
 
         # ================================================================================================================
@@ -104,6 +104,7 @@ def show_maximization():
         spend_array = spend_data[X].values  # Spending for media X over 12 months
         # Compute total spending S_total
         S_total = spend_array.sum()
+        benchmark_spend = 3 * S_total / np.count_nonzero(spend_array) # Compute the benchmark, or upper bound, for monthly spending
 
         # Handle the case when total spending is zero to avoid division by zero
         if S_total == 0:
@@ -156,7 +157,7 @@ def show_maximization():
                 continue
 
             # Step 2: Calculate annualized spending and find the closest match in df_params
-            S_yr = S_mo * multiplier
+            S_yr = min(S_mo, benchmark_spend) * multiplier
             M_P_X_col = spend_prefix + X
             TIncT_P_X_col = inc_prefix + X
             nMTIncT_P_X_col = minc_prefix + X  # Marginal rewards column
@@ -164,14 +165,16 @@ def show_maximization():
 
             # Find the index of the closest spending value in df_params
             idx_closest = (np.abs(df_params[M_P_X_col] - S_yr)).idxmin()
-
-            # Retrieve values from df_params
-            reward_yr = df_params.at[idx_closest, TIncT_P_X_col]
-            reward_mo = reward_yr / multiplier
+            if idx_closest == 0:
+                reward_mo = 0
+            else:
+                cpt_yr = df_params[cpt_prefix + X].iloc[idx_closest]
+                reward_mo = S_mo / cpt_yr
 
             # Calculate minc_mo and mc_mo for marginal cost per reward
             minc_mo = df_params.at[idx_closest, nMTIncT_P_X_col]
-            mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
+            # mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
+            mc_mo = 0.001 * S_yr
 
 
             # Accumulate total marginal increments and costs
@@ -181,7 +184,7 @@ def show_maximization():
             # Step 3: Generate the reward curve for the month
             timing_curve = df_curve[X].values  # Timing curve of length 52
             monthly_reward_curve = reward_mo * timing_curve
-
+            # monthly_arrays.append(monthly_reward_curve)
 
             # Step 4: Create a 104-length array with appropriate leading zeros
             start_week = start_weeks[fiscal_month - 1]
@@ -200,12 +203,14 @@ def show_maximization():
                     np.zeros(trailing_zeros)
                 ])
             monthly_arrays.append(monthly_array)
+        
 
-        # Aggregate the monthly arrays into a final reward curve
+        #Aggregate the monthly arrays into a final reward curve
         monthly_arrays = [arr[:104] for arr in monthly_arrays]  # Ensure each array is at most 104 elements
         # Pad any shorter arrays to exactly 104 elements
         monthly_arrays = [np.pad(arr, (0, 104 - len(arr)), 'constant') if len(arr) < 104 else arr for arr in monthly_arrays]
         reward_X = np.sum(monthly_arrays, axis=0)
+
 
         # Construct the output DataFrame
         columns = [f'Month_{i+1}' for i in range(12)] + ['aggregated']
@@ -236,7 +241,7 @@ def show_maximization():
                 Each array includes leading and trailing zeros.
         """
         # Ensure global access to necessary dataframes
-        global df_curve, df_params, df_time
+        # global df_curve, df_params, df_time
 
         # Step 1: Get the list of media columns from spend_data
         medias = spend_data.columns.tolist()[1:]
@@ -287,7 +292,25 @@ def show_maximization():
 
 
     def plan_forecast_craft(spend_data, planning_year, lead_years, lag_years, cutoff):
-        weekly_table = df_time[['FIS_WK_END_DT', 'FIS_YR_NB', 'FIS_QTR_NB', 'FIS_MO_NB']]
+        """
+        Generate monthly and quarterly forecast tables based on spending data and reward calculations.
+
+        Args:
+            spend_data (pd.DataFrame): DataFrame containing spending data with columns:
+                - 'FIS_MO_NB': Fiscal month number.
+                - Media spending columns (e.g., 'NTV', 'ING', 'STR').
+            planning_year (int): The fiscal year of the current spending plan.
+            lead_years (int): Number of years to add as leading zeros.
+            lag_years (int): Number of years to add as trailing zeros.
+            cutoff (float): Threshold value for reward calculations.
+
+        Returns:
+            tuple: A tuple containing:
+                - craft_mo (pd.DataFrame): DataFrame with monthly forecast data.
+                - craft_qtr (pd.DataFrame): DataFrame with quarterly forecast data.
+        """
+        df_time_scenario = df_time[df_time['FIS_YR_NB'].between(planning_year - lead_years, planning_year + lag_years)]
+        weekly_table = df_time_scenario[['FIS_WK_END_DT', 'FIS_YR_NB', 'FIS_QTR_NB', 'FIS_MO_NB']]
         results = compute_plan_reward(spend_data, planning_year, lead_years, lag_years, cutoff)
 
         names = []
@@ -435,7 +458,7 @@ def show_maximization():
         # Round up columns
         plan_summary['Total Spend'] = plan_summary['Total Spend'].astype(int)
         plan_summary['Total Attendance'] = plan_summary['Total Attendance'].astype(int)
-        plan_summary['Cost per Attendance'] = plan_summary['Cost per Attendance'].round(1)
+        plan_summary['Cost per Attendance'] = plan_summary['Cost per Attendance'].round(2)
         plan_summary['Marginal Cost per Attendance'] = plan_summary['Marginal Cost per Attendance'].round(1)
         plan_summary['ROAS'] = plan_summary['ROAS'].round(1)
         plan_summary['MROAS'] = plan_summary['MROAS'].round(1)
@@ -1146,19 +1169,21 @@ def show_maximization():
         return final_spend_plan, rewards
     
 
-    def optimization_summary(plan0, plan1, planning_year, rewards, cutoff, unit_revenue):
+    def optimization_summary(plan0, plan1, planning_year, planning_months, rewards, cutoff, unit_revenue):
 
         # Table 1 - Aggregate Summary
         # ****************************************************************************************************************
-        contents = ['Total Spend', 'Total Reward', 'Total Reward in Planning Period', 'Cost per Reward', 'Marginal Cost per Reward']
-        summary0 = build_plan_summary(plan0, planning_year, cutoff, unit_revenue).drop(columns = ['ROAS', 'MROAS'])
-        summary1 = build_plan_summary(plan1, planning_year, cutoff, unit_revenue).drop(columns = ['ROAS', 'MROAS'])
+        contents = ['Total Spend', 'Total Reward', 'Total Reward in Planning Period', 'Cost per Reward', 'Marginal Cost per Reward', 'ROAS', "MROAS"]
+        summary0 = build_plan_summary(plan0, planning_year, cutoff, unit_revenue)
+        summary1 = build_plan_summary(plan1, planning_year, cutoff, unit_revenue)
+        spend0 = int(plan0[plan0.FIS_MO_NB.isin(planning_months)].iloc[:, 1:].values.sum())
+        spend1 = int(plan1[plan1.FIS_MO_NB.isin(planning_months)].iloc[:, 1:].values.sum())
 
-        total_original = summary0.iloc[0, 1:].values.astype(int).tolist()
+        total_original = summary0.iloc[0, 1:].values.tolist()
         planning_original = rewards[0]
         collect_original = total_original[:2] + [planning_original] + total_original[2:]
 
-        total_optimized = summary1.iloc[0, 1:].values.astype(int).tolist()
+        total_optimized = summary1.iloc[0, 1:].values.tolist()
         planning_optimized = rewards[1]
         collect_optimized = total_optimized[:2] + [planning_optimized] + total_optimized[2:]
 
@@ -1167,6 +1192,20 @@ def show_maximization():
             'Original': collect_original,
             'Optimized': collect_optimized
         })
+
+        array_original = table1.Original.values
+        array_optimized = table1.Optimized.values
+
+        array_original[0] = spend0
+        array_original[3] = np.round(array_original[0] / array_original[2], 1) 
+        array_original[5] = np.round(unit_revenue * array_original[2] / array_original[0], 1)
+        table1['Original'] = array_original
+
+        array_optimized[0] = spend1
+        array_optimized[3] = np.round(array_optimized[0] / array_optimized[2], 1)
+        array_optimized[5] = np.round(unit_revenue * array_optimized[2] / array_optimized[0], 1)
+        table1['Optimized'] = array_optimized
+
 
         table1['Change'] = table1['Optimized'] - table1['Original']
         table1['Change (%)'] = np.round((table1.Optimized / table1.Original - 1) * 100, 1)
@@ -1241,12 +1280,19 @@ def show_maximization():
         for key in ['maximizer_region_validated', 'maximizer_region', 'maximizer_region_code']:
             st.session_state.pop(key, None)
         st.session_state['maximizer_page_loaded'] = True
+
     
     # Refresh other functionalities
     # ********************************************************************
     st.session_state['refresh_scenario'] = "Yes"
     st.session_state['refresh_minimizer'] = "Yes"
     st.session_state["scenario_computed"] = False
+
+    # Clear minimizer results if they exist when entering maximization page
+    if 'minimizer_done' in st.session_state:
+        st.session_state['minimizer_done'] = False
+    if 'minimizer_results' in st.session_state:
+        st.session_state.pop('minimizer_results', None)
 
 
     # Initialize session state variables
@@ -1310,6 +1356,8 @@ def show_maximization():
 
             media_mapping = media_mapping_file[media_mapping_file.region == region].set_index('media_code').to_dict()['media_label']
             media_mapping_inverse = {value: key for key, value in media_mapping.items()}
+            media_labels = media_mapping.values()
+
             mmm_year = model_versions.loc[model_versions.region == region, 'update'].values[0]
             adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
             price = model_versions.loc[model_versions.region == region, 'price'].values[0]
@@ -1322,8 +1370,11 @@ def show_maximization():
             )
 
             df_base = pd.read_csv(file_base)
-            df_base.columns = ['FIS_MO_NB'] + list(media_mapping.keys())
-            df_base['FIS_MO_NB'] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            df_base = df_base.T.iloc[1:, :]
+            df_base.columns = media_mapping.keys()
+            df_base.reset_index(inplace=True)
+            df_base.rename(columns={'index': 'FIS_MO_NB'}, inplace=True)
+            df_base['FIS_MO_NB'] = np.arange(1, 13)
 
             df_curve  = pd.read_csv(file_curve)
             media_list = df_curve.columns.tolist()
@@ -1415,10 +1466,10 @@ def show_maximization():
                 'Lower Bound (%)' : 80,
                 'Upper Bound (%)' : 120
             })
-            df_bounds['Media'] = df_bounds['Media'].replace(media_mapping)
-            df_bounds_user = df_bounds.T.iloc[1:, :]
-            df_bounds_user.columns = df_bounds.Media.values
-            df_bounds_user
+
+            df_bounds_user = df_bounds.copy()
+            df_bounds_user['Media'] = df_bounds_user['Media'].replace(media_mapping)
+
 
             container = st.container()
             with container:
@@ -1427,12 +1478,14 @@ def show_maximization():
                     df_bounds_user,
                     height = (num_rows + 1) * 35 + 3,                
                 ) 
-
-            df_bounds_coded = df_bounds_user.rename(columns = media_mapping_inverse)
-            df_bounds_coded = df_bounds_coded.T.reset_index()
+            
+            df_bounds_coded = df_bounds_user.copy()
+            df_bounds_coded['Media'] = df_bounds_coded['Media'].replace(media_mapping_inverse)
             df_bounds_coded.columns = ['Media', 'LB', 'UB']
             for x in df_bounds_coded.columns[1:]:
                 df_bounds_coded[x] = df_bounds_coded[x].astype(float) / 100
+
+            
 
             # Error Catching
             # *********************************************************************************************
@@ -1453,7 +1506,7 @@ def show_maximization():
                     result_package = optimization_summary(
                         spend_plan,
                         crafts[0],
-                        2024,
+                        2024, planning_months,
                         crafts[1],
                         adjust_ratio,
                         price
@@ -1462,13 +1515,90 @@ def show_maximization():
                     result_package.append(build_plan_summary(spend_plan, 2024, adjust_ratio, price))
                     result_package.append(build_plan_summary(result_package[0], 2024, adjust_ratio, price))
 
+
+                    # Final Formatting 
+                    # -----------------------------------------------------------------------------------------------------------
+                     
+                    # Optimized spend
+                    # ................................................................
+                    optimized_spend = result_package[0]
+                    for x in optimized_spend.columns[1:]:
+                        optimized_spend[x] = optimized_spend[x].astype(float).round(1)
+
+                    optimized_spend = optimized_spend.T.iloc[1:, :]
+                    optimized_spend.columns = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'] 
+                    optimized_spend['Media'] = media_labels
+                    shard1 = optimized_spend['Media']
+                    shard2 = optimized_spend.drop(columns = ['Media'])
+                    optimized_spend = pd.concat([shard1, shard2], axis=1)
+                    result_package[0] = optimized_spend
+
+
+                    # Summary by media
+                    # ...........................................................
+                    summary = result_package[2]
+                    summary['Media'] = media_labels
+                    columns2 = [s.replace("Reward", "Attendance") for s in summary.columns]
+                    summary.columns = columns2
+                    result_package[2] = summary
+
+
+                    # Plot comparison 1
+                    # ...........................................................
+                    summary0 = result_package[3]
+                    summary1 = result_package[4]
+
+                    fig1 = scenario_plots(
+                        scenarios = [summary0.iloc[1:, :], summary1.iloc[1:, :]],
+
+                        metrics = ['Total Spend', 'MROAS'],
+
+                        channels = list(media_labels),
+
+                        colors = ['rgb(174, 139, 113)', 
+                                'rgb(140, 63, 12)',
+                                'rgb(174, 139, 113)',
+                                'rgb(140, 63, 12)'
+                                
+                                ],
+
+                        title = "Media budget & MROAS variation per touchpoint", 
+
+                        ylabel1 = "", ylabel2= "", currency_symbol = currency 
+                    )
+
+
+
+                    fig2 = scenario_plots(
+                        scenarios = [summary0.iloc[1:, :], summary1.iloc[1:, :]],
+
+                        metrics = ['Total Attendance', 'Cost per Attendance'],
+
+                        channels = list(media_labels),
+
+                        colors = ['rgb(188, 214, 150)', 
+                                'rgb(36, 84, 40)',
+                                'rgb(188, 214, 150)', 
+                                'rgb(36, 84, 40)'
+                                ],
+
+                        title = "Incremental attendance & CPA evolution", 
+
+                        ylabel1 = "", ylabel2= "", currency_symbol = currency 
+                    )
+                    
+                    result_package[3] = fig1
+                    result_package[4] = fig2
+
+
+
                     """
                     Summary of result package items: 
                     [0] - Optimized Spend
                     [1] - Aggregate Summary
                     [2] - Summary by Media
-                    [3] - Summary for original spend plan
-                    [4] - Summary for optimized spend plan
+                    [3] - Spend & MROAS comparison plot
+                    [4] - Attendance & CPA comparison plot
                     """
 
                     st.success("Optimization performed successfully! Please check the results in the output tab 👉")
@@ -1483,85 +1613,73 @@ def show_maximization():
             result_package = st.session_state['maximizer_results']
             st.write("")
             st.write("")
-            viewing = st.selectbox("Select result format to view",['Optimized Spend','Aggregate Summary','Summary by Media'])
-
-            if viewing == "Optimized Spend":
-                optimized_spend = result_package[0]
-                for x in optimized_spend.columns[1:]:
-                    optimized_spend[x] = optimized_spend[x].astype(float).round(1)
-                nrows = optimized_spend.shape[0]
-                optimized_spend_showing = optimized_spend.rename(columns = media_mapping)
-
-                container = st.container()
-                with container:
-                    st.dataframe(optimized_spend_showing, 
-                                height = (nrows + 1) * 35 + 3, 
-                                hide_index=True)
-                    
-
-                # Plots
-                # *****************************************************************************************************
-                summary0 = result_package[3]
-                summary1 = result_package[4]
-                fig = scenario_plots(
-                    scenarios = [summary0.iloc[1:, :], summary1.iloc[1:, :]],
-
-                    metrics = ['Total Spend', 'MROAS'],
-
-                    channels = list(media_mapping.values()),
-
-                    colors = ['rgb(174, 139, 113)', 
-                            'rgb(140, 63, 12)',
-                            'rgb(174, 139, 113)',
-                            'rgb(140, 63, 12)'
-                            
-                            ],
-
-                    title = "Media budget & MROAS variation per touchpoint", 
-
-                    ylabel1 = "", ylabel2= "", currency_symbol = currency 
-                )
-                st.plotly_chart(fig)
-
-                fig = scenario_plots(
-                    scenarios = [summary0.iloc[1:, :], summary1.iloc[1:, :]],
-
-                    metrics = ['Total Attendance', 'Cost per Attendance'],
-
-                    channels = list(media_mapping.values()),
-
-                    colors = ['rgb(188, 214, 150)', 
-                            'rgb(36, 84, 40)',
-                            'rgb(188, 214, 150)', 
-                            'rgb(36, 84, 40)'
-                            ],
-
-                    title = "Incremental attendance & CPA evolution", 
-
-                    ylabel1 = "", ylabel2= "", currency_symbol = currency 
-                )
-                st.plotly_chart(fig)
+            viewing = st.selectbox("Select result format to view",['Aggregate Summary', 'Optimized Spend', 'Detailed Summary by Media'])
 
 
 
-                    
+            # 1) Aggregate Summary
+            # ********************************************************************************************
             if viewing == 'Aggregate Summary':
                 summary = result_package[1]
 
                 # Some post-processing
-                # ********************************************************************************************
                 summary = summary[summary.Contents != 'Total Reward'] # Hide total (12-month) reward
-
+                summary['Contents'] = [x.replace("Reward", "Attendance") for x in summary.Contents]
                 nrows = summary.shape[0]
-                
+
+                attendance_change = summary["Change (%)"].values[1] 
+                color_attendance_change = f'<span style="color:blue">{attendance_change}%</span>'
+
+                cpa_change = summary["Change (%)"].values[2]
+                color_cpa_change = f'<span style="color:blue">{cpa_change}%</span>'
+
+                # Verbal summary draft
+                verbal_summary1 = f"Now this is nice. With the optimized spend plan, we can use the same total budget but achieve {color_attendance_change} more attendance than the original plan. That's {color_cpa_change} drop in cost per attendance!"
+                verbal_summary2 = "See below for the aggregate level details or use the dropdown menu to explore the detailed summary by media."
+
+
+                # Verval Summary
+                col1, spacing_col, col2 = st.columns([5, 1, 5]) 
+                with col1:
+                    st.markdown(f'<p style="font-size: 8px;">{verbal_summary1}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p style="font-size: 8px;">{verbal_summary2}</p>', unsafe_allow_html=True)
+                    container = st.container()
+                    with container:
+                        st.dataframe(summary, 
+                                    height = (nrows + 1) * 35 + 3, 
+                                    hide_index=True)
+                with col2:
+                    st.image("static_files/images/soul-joe-mr-mittens3.png", width= 350)
+
+
+
+
+            # 2) Optimized Spend
+            # ********************************************************************************************
+            if viewing == "Optimized Spend":
+                # Table
+                optimized_spend = result_package[0]
+                nrows = optimized_spend.shape[0]
+
                 container = st.container()
                 with container:
-                    st.dataframe(summary, 
+                    st.dataframe(optimized_spend, 
                                 height = (nrows + 1) * 35 + 3, 
                                 hide_index=True)
+                    
+                # Plots
+                plot_spend = result_package[3]
+                plot_attn = result_package[4]
+
+                st.plotly_chart(plot_spend )
+                st.plotly_chart(plot_attn )
 
 
-            if viewing == 'Summary by Media':
+
+
+            # 3) Media Level Summary
+            # ********************************************************************************************
+            if viewing == 'Detailed Summary by Media':
                 summary = result_package[2]
                 nrows = summary.shape[0]
                 
