@@ -17,7 +17,6 @@ def show_scenario():
     # Set Up
     #===============================================================================================================================
     months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'] 
-    # planning_years = [2023, 2024, 2025, 2026]
     params_file_loc = 'data/'
 
     spend_prefix = "M_P_"  
@@ -67,7 +66,7 @@ def show_scenario():
     #===============================================================================================================================
     def compute_reward_X(X, spend_data, planning_year, threshold):
         """
-        Compute the rewards over a 104-week period for a given media type and calculate
+        Compute the rewards over a 156-week period for a given media type and calculate
         marginal increments and costs, with an updated multiplier calculation based on a threshold.
 
         Args:
@@ -81,12 +80,12 @@ def show_scenario():
 
         Returns:
             tuple: A tuple containing:
-                - reward_df (pd.DataFrame): DataFrame of shape (104, 13) with the reward curves.
+                - reward_df (pd.DataFrame): DataFrame of shape (156, 13) with the reward curves.
                 - minc_X (float): Total marginal rewards for media X over 12 months.
                 - mc_X (float): Total marginal costs for media X over 12 months.
         """
         # Ensure global access to necessary dataframes
-        nonlocal df_curve, df_params, df_time
+        # nonlocal df_curve, df_params, df_time
 
         # ================================================================================================================
         # Step 1: Extract the spending array and compute the multiplier
@@ -94,7 +93,10 @@ def show_scenario():
         spend_array = spend_data[X].values  # Spending for media X over 12 months
         # Compute total spending S_total
         S_total = spend_array.sum()
-        benchmark_spend = 3 * S_total / np.count_nonzero(spend_array) # Compute the benchmark, or upper bound, for monthly spending
+        if S_total > 0:
+            benchmark_spend = 3 * S_total / np.count_nonzero(spend_array) # Compute the benchmark, or upper bound, for monthly spending
+        if S_total == 0:
+            benchmark_spend = 1000000  # Set a default value to avoid division by zero 
 
         # Handle the case when total spending is zero to avoid division by zero
         if S_total == 0:
@@ -113,11 +115,11 @@ def show_scenario():
         # ================================================================================================================
         # Step 2: Compute the timing stuff
         # ================================================================================================================
-        # Prepare a list to hold the 104-length arrays for each month
+        # Prepare a list to hold the 156-length arrays for each month
         monthly_arrays = []
 
         # Get fiscal years and months from spend_data
-        fiscal_months = spend_data['FIS_MO_NB'].values
+        fiscal_months = spend_data.FIS_MO_NB.values.flatten()
 
         # Filter df_time for the relevant fiscal year
         df_time_filtered = df_time[df_time['FIS_YR_NB'] == planning_year]
@@ -129,6 +131,9 @@ def show_scenario():
         # Compute cumulative weeks to determine the starting week for each month
         cumulative_weeks = weeks_in_month.cumsum()
         start_weeks = [0] + cumulative_weeks.values.tolist()[:-1]
+
+        timeline = df_time[df_time.FIS_YR_NB.between(planning_year, planning_year + 2)].shape[0]
+        timeline = np.zeros(timeline)
 
         # Initialize total marginal increments and costs
         minc_X = 0.0
@@ -142,7 +147,7 @@ def show_scenario():
 
             if S_mo == 0:
                 # If the spending is zero, append an array of zeros
-                monthly_array = np.zeros(104)
+                monthly_array = timeline.copy()  # Create a an array of all 0s
                 monthly_arrays.append(monthly_array)
                 continue
 
@@ -164,7 +169,7 @@ def show_scenario():
 
             # Calculate minc_mo and mc_mo for marginal cost per reward
             minc_mo = df_params.at[idx_closest, nMTIncT_P_X_col]
-            # mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
+            mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
             mc_mo = 0.001 * S_yr
 
 
@@ -177,29 +182,16 @@ def show_scenario():
             monthly_reward_curve = reward_mo * timing_curve
             # monthly_arrays.append(monthly_reward_curve)
 
-            # Step 4: Create a 104-length array with appropriate leading zeros
+            # Step 4: Create a 3yr-length array with appropriate leading zeros
             start_week = start_weeks[fiscal_month - 1]
-            leading_zeros = int(start_week)
-            trailing_zeros = 104 - leading_zeros - 52
-            if trailing_zeros < 0:
-                # If there is an overlap beyond 104 weeks, truncate the array
-                monthly_array = np.concatenate([
-                    np.zeros(leading_zeros),
-                    monthly_reward_curve[:104 - leading_zeros]
-                ])
-            else:
-                monthly_array = np.concatenate([
-                    np.zeros(leading_zeros),
-                    monthly_reward_curve,
-                    np.zeros(trailing_zeros)
-                ])
+            end_week = start_week + len(monthly_reward_curve) 
+
+            monthly_array = timeline.copy()  
+            monthly_array[start_week:end_week] = monthly_reward_curve 
             monthly_arrays.append(monthly_array)
         
 
         #Aggregate the monthly arrays into a final reward curve
-        monthly_arrays = [arr[:104] for arr in monthly_arrays]  # Ensure each array is at most 104 elements
-        # Pad any shorter arrays to exactly 104 elements
-        monthly_arrays = [np.pad(arr, (0, 104 - len(arr)), 'constant') if len(arr) < 104 else arr for arr in monthly_arrays]
         reward_X = np.sum(monthly_arrays, axis=0)
 
 
@@ -209,7 +201,6 @@ def show_scenario():
         reward_df = pd.DataFrame(data, columns=columns)
 
         return reward_df, minc_X, mc_X
-    
 
 
     def compute_plan_reward(spend_data, planning_year, lead_years, lag_years, threshold):
@@ -842,6 +833,15 @@ def show_scenario():
 
             df_curve  = pd.read_csv(file_curve)
             media_list = df_curve.columns.tolist()
+            filler = []
+            for x in df_curve.columns:
+                shard = np.zeros(104)
+                values = df_curve[x].values
+                shard[:len(values)] = values
+                filler.append(shard)
+            df_curve = pd.DataFrame(np.array(filler).T, columns=df_curve.columns)
+            df_curve = df_curve.loc[~(df_curve == 0).all(axis=1)]
+            df_curve.fillna(0, inplace=True)  # Fill NaN values with 0
 
             df_params  = pd.read_csv(file_params)
             df_params.columns = [x.replace("TlncT", 'TIncT') for x in df_params.columns]
@@ -993,46 +993,62 @@ def show_scenario():
 
                             # Summary Table
                             # ******************************************************************** 
-                            results1 = build_plan_summary(scnr1_revised, 2024, adjust_ratio, price)
+                            results1 = build_plan_summary(scnr1_revised, mmm_year + 1, adjust_ratio, price)
                             # results1.iloc[:, 1:] = results1.iloc[:, 1:].round(1)
                             st.session_state['results1'] = results1
 
-                            results2 = build_plan_summary(scnr2_revised, 2024, adjust_ratio, price)
+                            results2 = build_plan_summary(scnr2_revised, mmm_year + 1, adjust_ratio, price)
                             # results2.iloc[:, 1:] = results2.iloc[:, 1:].round(1)
                             st.session_state['results2'] = results2 
 
 
                             # Timing Results - Monthly
                             # ********************************************************************
-                            mo_base = plan_forecast_craft(df_base, mmm_year, 0, 2, adjust_ratio)[0]
+                            mo_base = plan_forecast_craft(df_base, mmm_year, 0, 3, adjust_ratio)[0]
                             
-                            mo_scnr1 = plan_forecast_craft(scnr1_revised, mmm_year + 1, 1, 1, adjust_ratio)[0]
+                            mo_scnr1 = plan_forecast_craft(scnr1_revised, mmm_year + 1, 1, 2, adjust_ratio)[0]
                             forecast_craft_mo_s1 = pd.concat([mo_base, mo_scnr1], axis = 0)
                             forecast_craft_mo_s1.iloc[:, 1:] = forecast_craft_mo_s1.iloc[:, 1:].round(1)
                             forecast_craft_mo_s1 = forecast_table_summarizer(forecast_craft_mo_s1)
 
 
-                            mo_scnr2 = plan_forecast_craft(scnr2_revised, mmm_year + 1, 1, 1, adjust_ratio)[0]
+                            mo_scnr2 = plan_forecast_craft(scnr2_revised, mmm_year + 1, 1, 2, adjust_ratio)[0]
                             forecast_craft_mo_s2 = pd.concat([mo_base, mo_scnr2], axis = 0)
                             forecast_craft_mo_s2.iloc[:, 1:] = forecast_craft_mo_s2.iloc[:, 1:].round(1)
                             forecast_craft_mo_s2 = forecast_table_summarizer(forecast_craft_mo_s2)
+
+                            # Drop previous year columns
+                            # ...............................
+                            for df in [forecast_craft_mo_s1, forecast_craft_mo_s2]:
+                                drop_cols = [x for x in df.columns if str(mmm_year) in x] 
+                                df.drop(columns = drop_cols, inplace = True) 
+                                df.iloc[1:, 1] = df.iloc[1:, 1].astype(float).astype(int)  # Convert spend to int
+                                # df['Spend'] = df['Spend'].map('{:,}'.format)
 
                             st.session_state['forecast_crafts_mo'] = [forecast_craft_mo_s1, forecast_craft_mo_s2]
 
                             # Timing Results - Quarterly
                             # ********************************************************************
-                            qtr_base = plan_forecast_craft(df_base, mmm_year, 0, 2, adjust_ratio)[1]
+                            qtr_base = plan_forecast_craft(df_base, mmm_year, 0, 3, adjust_ratio)[1]
                             
-                            qtr_scnr1 = plan_forecast_craft(scnr1_revised, mmm_year + 1, 1, 1, adjust_ratio)[1]
+                            qtr_scnr1 = plan_forecast_craft(scnr1_revised, mmm_year + 1, 1, 2, adjust_ratio)[1]
                             forecast_craft_qtr_s1 = pd.concat([qtr_base, qtr_scnr1], axis = 0)
                             forecast_craft_qtr_s1.iloc[:, 1:] = forecast_craft_qtr_s1.iloc[:, 1:].round(1)
                             forecast_craft_qtr_s1 = forecast_table_summarizer(forecast_craft_qtr_s1)
 
 
-                            qtr_scnr2 = plan_forecast_craft(scnr2_revised, mmm_year + 1, 1, 1, adjust_ratio)[1]
+                            qtr_scnr2 = plan_forecast_craft(scnr2_revised, mmm_year + 1, 1, 2, adjust_ratio)[1]
                             forecast_craft_qtr_s2 = pd.concat([qtr_base, qtr_scnr2], axis = 0)
                             forecast_craft_qtr_s2.iloc[:, 1:] = forecast_craft_qtr_s2.iloc[:, 1:].round(1)
                             forecast_craft_qtr_s2 = forecast_table_summarizer(forecast_craft_qtr_s2)
+
+                            # Drop previous year columns
+                            # ...............................
+                            for df in [forecast_craft_qtr_s1, forecast_craft_qtr_s2]:
+                                drop_cols = [x for x in df.columns if str(mmm_year) in x] 
+                                df.drop(columns = drop_cols, inplace = True)
+                                df.iloc[1:, 1] = df.iloc[1:, 1].astype(float).astype(int)  # Convert spend to int
+                                # df['Spend'] = df['Spend'].map('{:,}'.format)
 
                             st.session_state['forecast_crafts_qtr'] = [forecast_craft_qtr_s1, forecast_craft_qtr_s2]
 

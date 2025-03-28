@@ -74,6 +74,7 @@ def get_img_as_base64(file):
 # Background Image
 # =====================================================================================================================
 img = get_img_as_base64("static_files/images/soul08.png")
+# img = get_img_as_base64("static_files/images/Ted.png")
 
 page_bg_img = f"""
 <style>
