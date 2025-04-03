@@ -815,6 +815,7 @@ def show_scenario():
             adjust_ratio = model_versions.loc[model_versions.region == region, 'adjust'].values[0]
             price = model_versions.loc[model_versions.region == region, 'price'].values[0]
             currency = model_versions.loc[model_versions.region == region, 'currency'].values[0]
+            st.session_state['scenario_currency'] = currency
 
             message = f"** {region} scenarios will be based on model results for fiscal year {mmm_year}"
             st.markdown(
@@ -1071,14 +1072,63 @@ def show_scenario():
             # ********************************************************************************************************************
             # Preparing Result Tables
             # ********************************************************************************************************************
+            currency_symbo = st.session_state['scenario_currency']
             results1 = st.session_state['results1']
             results2 = st.session_state['results2']
             forecast_crafts_mo = st.session_state['forecast_crafts_mo']
             forecast_crafts_qtr = st.session_state['forecast_crafts_qtr']
 
 
+            # Drafting a verbal summary message
+            # ...........................................
+            def metric_compare(df1, df2, varname): 
+                v1 = df1.loc[df1.Media == "Total", varname].values[0]
+                v2 = df2.loc[df2.Media == "Total", varname].values[0] 
+                difference = v2 - v1
+                pct = difference / v1 * 100
+                
+                if difference < 0:
+                    direction = "Decrease"
+                    string_diff = f'<span style="color:maroon">{difference:.1f}</span>'
+                    pct_diff = f'<span style="color:maroon">{pct:.1f}%</span>'
+                else:
+                    direction = "Increase"
+                    string_diff = f'<span style="color:blue">{difference:.1f}</span>'
+                    pct_diff = f'<span style="color:blue">{pct:.1f}%</span>'
 
+                
+                return direction, string_diff, pct_diff, difference
+            
+            changes_spend = metric_compare(results1, results2, 'Total Spend')
+            changes_attendance = metric_compare(results1, results2, 'Total Attendance')
+            changes_cpa = metric_compare(results1, results2, 'Cost per Attendance')
+            changes_mroas = metric_compare(results1, results2, 'MROAS')
+            
 
+            # Picking Winner
+            # ..........................................
+            if changes_cpa[-1] < 0:
+                winner = "Scenario 2"
+            if changes_cpa[-1] == 0:
+                winner = "No winner"
+            if changes_cpa[-1] > 0:
+                winner = "Scenario 1"
+            
+            
+
+            
+            message0 = "Let's see..." 
+            message1_0 = "Comparing to Scenario 1, Scenario 2 has "
+            message1_1 = f"an {changes_spend[0]} of {changes_spend[1]} ({changes_spend[2]}) in total spend, "
+            message1_2 = f"and {changes_attendance[0]} of {changes_attendance[1]} ({changes_attendance[2]}) in total attendance. "
+            message1_3 = f"That amounts to {currency_symbo}{changes_cpa[1]} ({changes_cpa[2]}) {changes_cpa[0]} in cost per attendance (CPA) or "
+            message1_4 = f"{currency_symbo}{changes_mroas[1]} ({changes_mroas[2]}) {changes_mroas[0]} in MROAS. "
+            message1 = message1_0 + message1_1 + message1_2 + message1_3 + message1_4 
+            if winner != "No winner":
+                message2 = f"Given the lower media cost per attendance, I would recommend {winner} as the better spend plan."
+            else:
+                message2 = "Since both scenarios have the same overall media cost per attendance, you can pick either one of them that favors business need from other perspective."
+            message3 = "Please check down below for more detailed summaries, or use the drop down menu to see the forecast of media driven attendance" 
 
             st.write("")
             st.write("")
@@ -1086,15 +1136,28 @@ def show_scenario():
 
 
             if viewing == 'Media Summary':
+                # Summary Tables
+                # *****************************************************************************************************
+                col1, spacing_col, col2 = st.columns([5, 1.5, 5]) 
+                with col1:
+                    st.markdown(f'<p style="font-size: 8px;">{message0}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p style="font-size: 8px;">{message1}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p style="font-size: 8px;">{message2}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p style="font-size: 8px;">{message3}</p>', unsafe_allow_html=True)
+                with col2:
+                    st.image("static_files/images/soul-joe-mr-mittens3.png", width= 350)
 
 
                 # Summary Tables
                 # *****************************************************************************************************
                 col1, col2 = st.columns(2)
-            
+
                 with col1:
                     st.write("")
-                    st.markdown("## Scenario 1")
+                    if winner == "Scenario 1":
+                        st.markdown("## Scenario 1 🌹")
+                    else:
+                        st.markdown("## Scenario 1")
                     container = st.container()
                     table = results1
                     table['Media'] = table['Media'].replace(media_mapping).fillna(table['Media'])
@@ -1105,7 +1168,10 @@ def show_scenario():
 
                 with col2:
                     st.write("")
-                    st.markdown("## Scenario 2")
+                    if winner == "Scenario 2":
+                        st.markdown("## Scenario 2 🌹")
+                    else:
+                        st.markdown("## Scenario 2")
                     container = st.container()
                     table = results2
                     table['Media'] = table['Media'].replace(media_mapping).fillna(table['Media'])

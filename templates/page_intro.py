@@ -14,7 +14,7 @@ def show_intro():
                 Welcome to the SOUL - Scenario and Optimization Unified Lab! 
                 
                 Media spend planning is an art of tuning and balancing. 
-                Equiped with the latest media mix model results and advanced algorithms, this is a place for you to rehearsal over and over again until you reach the perfect harmony across media channels.  
+                Equiped with the latest media mix model results and advanced algorithms, this is a space for you to improvise, rehearsal, over and over again until you reach the perfect harmony across media channels.  
                 ''')
         
     # The middle column creates the white space

@@ -350,6 +350,19 @@ def show_maximization():
         return craft_mo, craft_qtr
 
 
+    def forecast_table_summarizer(table):
+        shard1 = ['Total Attendance', ""]
+        shard2 = list(table.iloc[:, 2:].sum(axis = 0).values)
+
+        table.loc[-1] = np.array(shard1 + shard2)
+        table = table.reset_index(drop = True)
+
+        shard1 = table.iloc[:-1]
+        shard2 = table.iloc[[-1]]
+
+        table2 = pd.concat([shard2, shard1], axis = 0).reset_index(drop = True)
+        return table2
+
 
 
     def build_plan_summary(spend_data, planning_year, threshold, unit_revenue):
@@ -1519,6 +1532,50 @@ def show_maximization():
                     result_package.append(build_plan_summary(spend_plan, 2024, adjust_ratio, price))
                     result_package.append(build_plan_summary(result_package[0], 2024, adjust_ratio, price))
 
+                    # 2) Attendance Forecast
+                    mo_base = plan_forecast_craft(df_base, mmm_year, 0, 3, adjust_ratio)[0]
+
+                    mo_scnr1 = plan_forecast_craft(spend_plan, mmm_year + 1, 1, 2, adjust_ratio)[0]
+                    forecast_craft_mo_s1 = pd.concat([mo_base, mo_scnr1], axis = 0)
+                    forecast_craft_mo_s1.iloc[:, 1:] = forecast_craft_mo_s1.iloc[:, 1:].round(1)
+                    forecast_craft_mo_s1 = forecast_table_summarizer(forecast_craft_mo_s1)
+
+                    mo_scnr2 = plan_forecast_craft(result_package[0], mmm_year + 1, 1, 2, adjust_ratio)[0]
+                    forecast_craft_mo_s2 = pd.concat([mo_base, mo_scnr2], axis = 0)
+                    forecast_craft_mo_s2.iloc[:, 1:] = forecast_craft_mo_s2.iloc[:, 1:].round(1)
+                    forecast_craft_mo_s2 = forecast_table_summarizer(forecast_craft_mo_s2)
+
+                    # Drop previous year columns
+                    for df in [forecast_craft_mo_s1, forecast_craft_mo_s2]:
+                        drop_cols = [x for x in df.columns if str(mmm_year) in x] 
+                        df.drop(columns = drop_cols, inplace = True) 
+                        df.iloc[1:, 1] = df.iloc[1:, 1].astype(float).astype(int)
+
+
+                    qtr_base = plan_forecast_craft(df_base, mmm_year, 0, 3, adjust_ratio)[1]
+
+                    qtr_scnr1 = plan_forecast_craft(spend_plan, mmm_year + 1, 1, 2, adjust_ratio)[1]
+                    forecast_craft_qtr_s1 = pd.concat([qtr_base, qtr_scnr1], axis = 0)
+                    forecast_craft_qtr_s1.iloc[:, 1:] = forecast_craft_qtr_s1.iloc[:, 1:].round(1)
+                    forecast_craft_qtr_s1 = forecast_table_summarizer(forecast_craft_qtr_s1)
+
+                    qtr_scnr2 = plan_forecast_craft(result_package[0], mmm_year + 1, 1, 2, adjust_ratio)[1]
+                    forecast_craft_qtr_s2 = pd.concat([qtr_base, qtr_scnr2], axis = 0)
+                    forecast_craft_qtr_s2.iloc[:, 1:] = forecast_craft_qtr_s2.iloc[:, 1:].round(1)
+                    forecast_craft_qtr_s2 = forecast_table_summarizer(forecast_craft_qtr_s2)
+
+                    for df in [forecast_craft_qtr_s1, forecast_craft_qtr_s2]:
+                        drop_cols = [x for x in df.columns if str(mmm_year) in x] 
+                        df.drop(columns = drop_cols, inplace = True)
+                        df.iloc[1:, 1] = df.iloc[1:, 1].astype(float).astype(int)
+
+                    forecasts = [forecast_craft_mo_s1, forecast_craft_mo_s2,
+                                    forecast_craft_qtr_s1, forecast_craft_qtr_s2
+                                    ]
+
+                    result_package.append(forecasts) 
+
+
 
                     # Final Formatting 
                     # -----------------------------------------------------------------------------------------------------------
@@ -1617,7 +1674,7 @@ def show_maximization():
             result_package = st.session_state['maximizer_results']
             st.write("")
             st.write("")
-            viewing = st.selectbox("Select result format to view",['Aggregate Summary', 'Optimized Spend', 'Detailed Summary by Media'])
+            viewing = st.selectbox("Select result format to view",['Aggregate Summary', 'Optimized Spend', 'Detailed Summary by Media', 'Attendance Forecast'])
 
 
 
@@ -1692,6 +1749,48 @@ def show_maximization():
                     st.dataframe(summary, 
                                 height = (nrows + 1) * 35 + 3, 
                                 hide_index=True)
+
+            # 4) Attendance Forecast
+            # ********************************************************************************************
+            if viewing == 'Attendance Forecast':
+                col1, col2 = st.columns(2)
+                with col1:
+                    scenario = st.radio("", ['Original', 'Optimized'])
+                with col2:
+                    timeframe  = st.radio("", ['Monthly', 'Quarterly'])
+
+                if (scenario == 'Original') & (timeframe == 'Monthly'):
+                    table = result_package[5][0]
+                    table.iloc[:, 2:] = table.iloc[:, 2:].astype(float).astype(int)
+                    container = st.container()
+                    with container:
+                        numRows = table.shape[0]
+                        st.dataframe(table, height = (numRows + 1) * 35 + 3, hide_index=True)
+
+                if (scenario == 'Optimized') & (timeframe == 'Monthly'):
+                    table = result_package[5][1]
+                    table.iloc[:, 2:] = table.iloc[:, 2:].astype(float).astype(int)
+                    container = st.container()
+                    with container:
+                        numRows = table.shape[0]
+                        st.dataframe(table, height = (numRows + 1) * 35 + 3, hide_index=True)
+
+                if (scenario == 'Original') & (timeframe == 'Quarterly'):
+                    table = result_package[5][2]
+                    table.iloc[:, 2:] = table.iloc[:, 2:].astype(float).astype(int)
+                    container = st.container()
+                    with container:
+                        numRows = table.shape[0]
+                        st.dataframe(table, height = (numRows + 1) * 35 + 3, hide_index=True)
+
+                if (scenario == 'Optimized') & (timeframe == 'Quarterly'):
+                    table = result_package[5][3]
+                    table.iloc[:, 2:] = table.iloc[:, 2:].astype(float).astype(int)
+                    container = st.container()
+                    with container:
+                        numRows = table.shape[0]
+                        st.dataframe(table, height = (numRows + 1) * 35 + 3, hide_index=True)
+
 
 
 
