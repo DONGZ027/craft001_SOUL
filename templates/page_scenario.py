@@ -825,6 +825,9 @@ def show_scenario():
 
             # Set up dataframes 
             # ********************************************************************
+            spend_template = pd.read_csv(file_base)
+            spend_template = spend_template.to_csv(index = False).encode("utf-8")
+
             df_base = pd.read_csv(file_base)
             df_base = df_base.T.iloc[1:, :]
             df_base.columns = media_mapping.keys()
@@ -859,7 +862,19 @@ def show_scenario():
             if 'results_df' not in st.session_state:
                 st.session_state['results_df'] = pd.DataFrame() 
 
-            uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
+            col1, spacing_col, col2 = st.columns([5, 1, 5]) 
+            with col1:
+                uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
+            with col2:
+                st.write("")
+                st.write("")
+                st.download_button(
+                    label = "Download Template",
+                    data = spend_template,
+                    file_name = f"spend_plan_template_{region}.csv"
+                    # mime="text/csv",
+                    # icon=":material/download:",
+                )
 
             if uploaded_files:
                 #.......................................................................................................
