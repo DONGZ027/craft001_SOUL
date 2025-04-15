@@ -175,8 +175,14 @@ def show_maximization():
             if idx_closest == 0:
                 reward_mo = 0
             else:
-                cpt_yr = df_params[cpt_prefix + X].iloc[idx_closest]
-                reward_mo = S_mo / cpt_yr
+                # Logic 1: read row (annual) increment and divide by the multiplie
+                # ............................................................
+                reward_mo = df_params[inc_prefix + X].iloc[idx_closest] / multiplier
+                
+                # Logic 2: use row CPT and actual monthly spend
+                # ................................................................
+                # cpt_yr = df_params[cpt_prefix + X].iloc[idx_closest]
+                # reward_mo = S_mo / cpt_yr
 
             # Calculate minc_mo and mc_mo for marginal cost per reward
             minc_mo = df_params.at[idx_closest, nMTIncT_P_X_col]
