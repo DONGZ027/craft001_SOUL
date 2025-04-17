@@ -187,7 +187,7 @@ def show_maximization():
             # Calculate minc_mo and mc_mo for marginal cost per reward
             minc_mo = df_params.at[idx_closest, nMTIncT_P_X_col]
             mc_mo = df_params.at[idx_closest, Pct_Delta_col] * S_yr
-            mc_mo = 0.001 * S_yr
+            # mc_mo = 0.001 * S_yr
 
 
             # Accumulate total marginal increments and costs
@@ -1340,8 +1340,17 @@ def show_maximization():
             st.session_state['refresh_maximizer'] = current_tab
 
         # Get region code from user
-        region_code_maximizer = st.text_input("Please enter the region password", key="maximizer_password_input")
+        st.write("Please enter the region password")
+        col1, col2 = st.columns([5, 5])
+        with col1:
+            container = st.container(border = True)
+            with container:
+                region_code_maximizer = st.text_input("placeholder",
+                                                    label_visibility= "collapsed",
+                                                    key="scenario_password_input")
         st.session_state['maximizer_region_code'] = region_code_maximizer
+        with col2:
+            st.write("")
         
         # Validate password
         if region_code_maximizer:
