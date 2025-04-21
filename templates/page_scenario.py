@@ -10,6 +10,10 @@ from plotly.subplots import make_subplots
 today = date.today()
 import time
 
+import warnings
+# Suppress all warnings
+warnings.filterwarnings("ignore")
+
 
 def show_scenario():
 

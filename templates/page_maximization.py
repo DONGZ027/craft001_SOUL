@@ -10,6 +10,10 @@ import time
 from datetime import date
 today = date.today()
 
+import warnings
+# Suppress all warnings
+warnings.filterwarnings("ignore")
+
 
 def show_maximization():
 
@@ -31,7 +35,7 @@ def show_maximization():
         "August",
         "September",
         ]
-    planning_years = [2023, 2024, 2025, 2026]
+    planning_years = [2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030]
     params_file_loc = 'data/'
 
     spend_prefix = "M_P_"  
@@ -242,6 +246,7 @@ def show_maximization():
         """
         # Ensure global access to necessary dataframes
         # global df_curve, df_params, df_time
+
 
         # Step 1: Get the list of media columns from spend_data
         medias = spend_data.columns.tolist()[1:]
@@ -777,9 +782,11 @@ def show_maximization():
 
         # Step 1: Compute reward_debit
         # ================================================================================================================
+        print("computing reward_credt_year0")
         reward_credit_year0 = compute_plan_reward(base_year, planning_year - 1, 0, 1, cutoff)[-1][planning_weeks].sum()
         reward_credit_year1 = 0
         if min(planning_months) > 1:
+            print("computing reward_credit_year1")
             plan_rewards = compute_plan_reward(spend_plan, planning_year, 1, 0, cutoff) 
             for i in np.arange(min(planning_months) - 1):
                 print(i)
@@ -1531,7 +1538,7 @@ def show_maximization():
                 with st.spinner("I'm working on it ..."):
                     crafts = budget_maximizer(spend_plan, 
                                             planning_months, 
-                                            planning_years[1], 
+                                            mmm_year + 1, 
                                             df_base,
                                             df_bounds_coded, 
                                             adjust_ratio)

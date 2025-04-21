@@ -22,3 +22,18 @@ WDW,SEM,Paid Search
 WDW,PAID_SOCIAL,Paid Social
 WDW,DCI,Digital Content Integration
 WDW,DRD,Digital Audio
+DLR_SoCal,LTV,Local TV
+DLR_SoCal,STR,Streaming
+DLR_SoCal,YOT,YouTube
+DLR_SoCal,CIN,Cinema
+DLR_SoCal,DIS,Display
+DLR_SoCal,SEM,Paid Search
+DLR_SoCal,FAB,Facebook
+DLR_SoCal,SNP,Snapchat
+DLR_SoCal,TWT,Twitter
+DLR_SoCal,PIN,Pinterest
+DLR_SoCal,TIK,Tiktok
+DLR_SoCal,DCI,DCI
+DLR_SoCal,DRD,Digital Radio
+DLR_SoCal,LRD,Local Radio
+DLR_SoCal,OOH,Out of Home

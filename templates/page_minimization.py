@@ -10,6 +10,9 @@ import time
 from datetime import date
 today = date.today()
 
+import warnings
+# Suppress all warnings
+warnings.filterwarnings("ignore")
 
 def show_minimization():
 
@@ -31,7 +34,7 @@ def show_minimization():
         "August",
         "September",
         ]
-    planning_years = [2023, 2024, 2025, 2026]
+    planning_years = [2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030]
     params_file_loc = 'data/'
 
     spend_prefix = "M_P_"  
@@ -1606,7 +1609,7 @@ def show_minimization():
                 with st.spinner("I'm working on it ..."):
                     crafts = budget_minimizer(spend_plan, 
                                             planning_months, 
-                                            planning_years[1], 
+                                            mmm_year + 1, 
                                             df_base, 
                                             attendance_goal, 
                                             df_bounds_coded, 
