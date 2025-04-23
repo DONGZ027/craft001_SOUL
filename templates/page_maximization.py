@@ -1495,6 +1495,25 @@ def show_maximization():
             spend_plan.rename(columns= {'index' : 'FIS_MO_NB'}, inplace = True)
             spend_plan['FIS_MO_NB'] = spend_plan['FIS_MO_NB'].apply(lambda x: months_full.index(x) + 1) 
 
+
+            # Compute media-driven attendance given current spend plan
+            # ....................................
+            mo_base = plan_forecast_craft(df_base, mmm_year, 0, 3, adjust_ratio)[0]
+            mo_scnr1 = plan_forecast_craft(spend_plan, mmm_year + 1, 1, 2, adjust_ratio)[0]
+            forecast_craft_mo_s1 = pd.concat([mo_base, mo_scnr1], axis = 0)
+            forecast_craft_mo_s1.iloc[:, 1:] = forecast_craft_mo_s1.iloc[:, 1:].round(1)
+            forecast_craft_mo_s1 = forecast_table_summarizer(forecast_craft_mo_s1)
+            
+            current_gain = forecast_craft_mo_s1.iloc[:, 14:14+12]
+            indices = np.array(planning_months) - 1
+            current_gain= current_gain.iloc[0, indices].values
+            current_gain = [float(x) for x in current_gain]
+            message = f"Attendance from current plan = {int(sum(current_gain))}"
+            st.markdown(
+                f"<p style='font-size: 6px; color: #4e98ff; font-style: italic;'>{message}</p>",
+                unsafe_allow_html=True
+            )
+
             
             # User input 4: Choosing media bounds
             # ********************************************************************************************
@@ -1555,13 +1574,6 @@ def show_maximization():
                     result_package.append(build_plan_summary(result_package[0], 2024, adjust_ratio, price))
 
                     # 2) Attendance Forecast
-                    mo_base = plan_forecast_craft(df_base, mmm_year, 0, 3, adjust_ratio)[0]
-
-                    mo_scnr1 = plan_forecast_craft(spend_plan, mmm_year + 1, 1, 2, adjust_ratio)[0]
-                    forecast_craft_mo_s1 = pd.concat([mo_base, mo_scnr1], axis = 0)
-                    forecast_craft_mo_s1.iloc[:, 1:] = forecast_craft_mo_s1.iloc[:, 1:].round(1)
-                    forecast_craft_mo_s1 = forecast_table_summarizer(forecast_craft_mo_s1)
-
                     mo_scnr2 = plan_forecast_craft(result_package[0], mmm_year + 1, 1, 2, adjust_ratio)[0]
                     forecast_craft_mo_s2 = pd.concat([mo_base, mo_scnr2], axis = 0)
                     forecast_craft_mo_s2.iloc[:, 1:] = forecast_craft_mo_s2.iloc[:, 1:].round(1)
